@@ -1,0 +1,44 @@
+{
+  "name": "@home-gallery/webapp",
+  "version": "1.0.0",
+  "description": "Web application frontend of HomeGallery",
+  "main": "index.js",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist *.tsbuildinfo",
+    "dev": "vite",
+    "build": "vite build",
+    "build:schema": "run-s schema:to-type schema:merge",
+    "schema:to-type": "dev-cli schema to-type",
+    "schema:merge": "dev-cli schema merge",
+    "serve": "vite preview"
+  },
+  "keywords": [
+    "HomeGallery",
+    "frontend",
+    "react"
+  ],
+  "author": "Sebastian Felis <sebastian@silef.de>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xemle/home-gallery.git",
+    "directory": "packages/webapp"
+  },
+  "dependencies": {
+    "@home-gallery/events": "file:../events",
+    "@home-gallery/logger": "file:../logger",
+    "@home-gallery/plugin": "file:../plugin",
+    "@home-gallery/query": "file:../query",
+    "@home-gallery/types": "file:../types"
+  },
+  "gallery": {
+    "config": {
+      "schema": "webapp.schema.json",
+      "type": "src/config/AppConfig.ts"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+.cache
+.vscode
+.nyc_output
+.tap
+build
+bundle-debug.log
+data
+dist
+dist-test
+node_modules
+*.tmp
+package-lock.json
+package-lock.json.cache
+gallery.config.yml
+latest-e2e
+*.tsbuildinfo
+brun.sh

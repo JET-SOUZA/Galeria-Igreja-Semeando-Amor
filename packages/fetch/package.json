@@ -1,0 +1,39 @@
+{
+  "name": "@home-gallery/fetch",
+  "version": "1.0.0",
+  "description": "Fetch data from other HomeGalleries",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist *.tsbuildinfo",
+    "build": "dev-cli build",
+    "watch": "dev-cli build --watch"
+  },
+  "keywords": [
+    "HomeGallery",
+    "fetch",
+    "sync"
+  ],
+  "author": "Sebastian Felis <sebastian@silef.de>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xemle/home-gallery.git",
+    "directory": "packages/fetch"
+  },
+  "dependencies": {
+    "@home-gallery/common": "file:../common",
+    "@home-gallery/database": "file:../database",
+    "@home-gallery/events": "file:../events",
+    "@home-gallery/logger": "file:../logger",
+    "@home-gallery/query": "file:../query",
+    "@home-gallery/storage": "file:../storage",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@home-gallery/dev-tools": "file:../dev-tools"
+  }
+}

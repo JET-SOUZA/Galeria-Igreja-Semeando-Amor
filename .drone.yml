@@ -1,0 +1,138 @@
+---
+# node env with current LTS: v18
+kind: pipeline
+type: docker
+name: node LTS
+
+platform:
+  arch: arm64
+
+steps:
+- name: install
+  image: node:20-alpine
+  commands:
+  - rm -rf packages/api-server
+  - npm set registry $NPM_REGISTRY
+  - node scripts/disable-dependency.js api-server
+  - npm install
+  - find node_modules/@ffprobe-installer -name ffprobe -exec chmod ugo+x {} \;
+  environment:
+    NPM_REGISTRY:
+      from_secret: npm_registry
+
+- name: build
+  image: node:20-alpine
+  commands:
+  - npm run build
+
+- name: test
+  image: node:20-alpine
+  commands:
+  - npm run test -- --workspace-concurrency=1
+  environment:
+    TAP_TIMEOUT: 60
+
+- name: test:e2e setup
+  image: node:20-alpine
+  commands:
+  - apk add --no-cache git git-lfs
+  - git clone $E2E_DATA_REPO ./data
+  environment:
+    E2E_DATA_REPO:
+      from_secret: e2e_data_repo
+  when:
+    branch:
+    - master
+    - develop
+    # execute also on tagged feature/fix branches
+    - feature/*e2e*
+    - fix/*e2e*
+    event:
+    - push
+
+- name: test:e2e - node v20 LTS
+  image: node:20-alpine
+  commands:
+  - apk add --no-cache perl vips-tools imagemagick
+  - npm run test:e2e
+  environment:
+    TZ: Europe/Berlin
+    GAUGE_HOME: /drone/src/.gauge
+    test_timeout: 120000 # 2 min timeout for gauge
+  when:
+    branch:
+    - master
+    - develop
+    # execute also on tagged feature/fix branches
+    - feature/*e2e*
+    - fix/*e2e*
+    event:
+    - push
+
+- name: test - node v18
+  image: node:18-alpine
+  commands:
+  - npm run test -- --workspace-concurrency=1
+  environment:
+    TAP_TIMEOUT: 60
+  when:
+    branch:
+    - master
+    - develop
+    # execute also on tagged feature/fix branches
+    - feature/*e2e*
+    - fix/*e2e*
+    event:
+    - push
+
+- name: test:e2e - node v18
+  image: node:18-alpine
+  commands:
+  - apk add --no-cache perl
+  - npm run test:e2e -- --tags run
+  environment:
+    TZ: Europe/Berlin
+    GAUGE_HOME: /drone/src/.gauge
+    test_timeout: 120000 # 2 min timeout for gauge
+  when:
+    branch:
+    - master
+    - develop
+    # execute also on tagged feature/fix branches
+    - feature/*e2e*
+    - fix/*e2e*
+    event:
+    - push
+
+- name: test - node v16
+  image: node:16-alpine
+  commands:
+  - npm run test -- --workspace-concurrency=1
+  environment:
+    TAP_TIMEOUT: 60
+  when:
+    branch:
+    - master
+    - develop
+    # execute also on tagged feature/fix branches
+    - feature/*e2e*
+    - fix/*e2e*
+    event:
+    - push
+
+- name: notify
+  image: sfelis/drone-email
+  settings:
+    from:
+      from_secret: mail_from
+    host:
+      from_secret: mail_host
+    port:
+      from_secret: mail_port
+    username:
+      from_secret: mail_username
+    password:
+      from_secret: mail_password
+  when:
+    status:
+    - failure

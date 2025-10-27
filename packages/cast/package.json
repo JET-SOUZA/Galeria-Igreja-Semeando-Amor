@@ -1,0 +1,41 @@
+{
+  "name": "@home-gallery/cast",
+  "version": "1.0.0",
+  "description": "Cast module for HomeGallery",
+  "type": "module",
+  "exports": {
+    "import": "./dist/index.js",
+    "require": "./dist/require-mapper.cjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist *.tsbuildinfo",
+    "build": "dev-cli build",
+    "watch": "dev-cli build --watch"
+  },
+  "keywords": [
+    "HomeGallery",
+    "chromecast",
+    "cast"
+  ],
+  "author": "Sebastian Felis <sebastian@silef.de>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xemle/home-gallery.git",
+    "directory": "packages/cast"
+  },
+  "dependencies": {
+    "@home-gallery/fetch": "file:../fetch",
+    "@home-gallery/logger": "file:../logger",
+    "castv2-client": "^1.2.0",
+    "express": "^5.1.0",
+    "http-proxy-middleware": "^3.0.5",
+    "multicast-dns": "^7.2.5"
+  },
+  "devDependencies": {
+    "@home-gallery/dev-tools": "file:../dev-tools"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@home-gallery/query",
+  "version": "1.0.0",
+  "description": "Search query",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist *.tsbuildinfo",
+    "compile": "nearleyc -o src/parser/grammar.js src/parser/grammar.ne",
+    "build": "dev-cli build",
+    "watch": "npm-run-all -p watch:js watch:nearley",
+    "watch:js": "dev-cli build --watch",
+    "watch:nearley": "onchange \"src/parser/*.ne\" --delay 500 -- npm run compile",
+    "test": "tap",
+    "watch:test": "tap repl w"
+  },
+  "keywords": [
+    "HomeGallery",
+    "Search query"
+  ],
+  "author": "Sebastian Felis <sebastian@silef.de>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xemle/home-gallery.git",
+    "directory": "packages/query"
+  },
+  "dependencies": {
+    "moo": "^0.5.1",
+    "nearley": "^2.20.1"
+  },
+  "devDependencies": {
+    "@home-gallery/dev-tools": "file:../dev-tools"
+  }
+}

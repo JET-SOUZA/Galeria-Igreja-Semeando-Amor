@@ -1,0 +1,40 @@
+{
+  "name": "@home-gallery/index",
+  "version": "1.0.0",
+  "description": "File indexer for HomeGallery",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist *.tsbuildinfo",
+    "build": "npm-run-all -p build:js build:types",
+    "build:js": "dev-cli build",
+    "build:types": "tsc",
+    "test": "tap",
+    "watch": "dev-cli build --watch",
+    "watch:test": "tap repl w"
+  },
+  "keywords": [
+    "HomeGallery",
+    "file",
+    "index",
+    "indexer"
+  ],
+  "author": "Sebastian Felis <sebastian@silef.de>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xemle/home-gallery.git",
+    "directory": "packages/index"
+  },
+  "dependencies": {
+    "@home-gallery/common": "file:../common",
+    "@home-gallery/logger": "file:../logger",
+    "split2": "^4.1.0"
+  },
+  "devDependencies": {
+    "@home-gallery/dev-tools": "file:../dev-tools"
+  }
+}

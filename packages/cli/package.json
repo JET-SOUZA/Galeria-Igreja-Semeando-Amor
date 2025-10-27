@@ -1,0 +1,49 @@
+{
+  "name": "@home-gallery/cli",
+  "version": "1.0.0",
+  "description": "Command line tool of HomeGallery",
+  "author": "Sebastian Felis <sebastian@silef.de>",
+  "homepage": "https://home-gallery.org",
+  "license": "MIT",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xemle/home-gallery.git",
+    "directory": "packages/cli"
+  },
+  "scripts": {
+    "clean": "rimraf dist *.tsbuildinfo",
+    "build": "dev-cli build",
+    "schema:merge": "dev-cli schema merge",
+    "test": "tap",
+    "watch": "dev-cli build --watch",
+    "watch:test": "tap repl w"
+  },
+  "dependencies": {
+    "@home-gallery/index": "file:../index",
+    "@home-gallery/cast": "file:../cast",
+    "@home-gallery/database": "file:../database",
+    "@home-gallery/export-meta": "file:../export-meta",
+    "@home-gallery/export-static": "file:../export-static",
+    "@home-gallery/extractor": "file:../extractor",
+    "@home-gallery/server": "file:../server",
+    "@home-gallery/fetch": "file:../fetch",
+    "@home-gallery/logger": "file:../logger",
+    "chokidar": "^3.5.3",
+    "enquirer": "^2.3.6",
+    "yaml": "^1.10.2",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@home-gallery/dev-tools": "file:../dev-tools"
+  },
+  "gallery": {
+    "config": {
+      "schema": "cli.schema.json"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "@home-gallery/api-server",
+  "version": "1.0.0",
+  "description": "Public api server for HomeGallery",
+  "type": "module",
+  "exports": "./index.js",
+  "scripts": {
+    "serve": "node index.js",
+    "test": "tap",
+    "watch:test": "tap repl w"
+  },
+  "keywords": [
+    "HomeGallery",
+    "api",
+    "server"
+  ],
+  "author": "Sebastian Felis <sebastian@silef.de>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xemle/home-gallery.git",
+    "directory": "packages/api-server"
+  },
+  "dependencies": {
+    "@tensorflow-models/coco-ssd": "2.2.2",
+    "@tensorflow-models/mobilenet": "2.1.0",
+    "@tensorflow/tfjs": "3.21.0",
+    "@tensorflow/tfjs-backend-cpu": "3.21.0",
+    "@tensorflow/tfjs-backend-wasm": "3.21.0",
+    "@tensorflow/tfjs-converter": "3.21.0",
+    "@tensorflow/tfjs-node": "3.21.1",
+    "@vladmandic/face-api": "0.13.3",
+    "express": "^5.1.0",
+    "jpeg-js": "^0.4.4",
+    "pino": "^9.9.0",
+    "pino-http": "^10.5.0",
+    "pino-pretty": "^13.1.1",
+    "node-fetch": "^3.3.2"
+  }
+}

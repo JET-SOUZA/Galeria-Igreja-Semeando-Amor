@@ -1,0 +1,14 @@
+{
+  "files": [
+    "[camelName].plugin.mjs.mustache"
+  ],
+  "modules": {
+    "extractor": [
+    ],
+    "database": [
+    ],
+    "query": [
+    ]
+  },
+  "dir": false
+}

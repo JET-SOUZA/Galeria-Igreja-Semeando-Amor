@@ -1,0 +1,30 @@
+{
+  "name": "@home-gallery/storage",
+  "version": "1.0.0",
+  "description": "Preview and metadata storage of HomeGallery",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist *.tsbuildinfo",
+    "build": "dev-cli build",
+    "watch": "dev-cli build --watch"
+  },
+  "keywords": [
+    "HomeGallery",
+    "storage"
+  ],
+  "author": "Sebastian Felis <sebastian@silef.de>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xemle/home-gallery.git",
+    "directory": "packages/storage"
+  },
+  "dependencies": {
+    "@home-gallery/common": "file:../common",
+    "@home-gallery/logger": "file:../logger"
+  }
+}
