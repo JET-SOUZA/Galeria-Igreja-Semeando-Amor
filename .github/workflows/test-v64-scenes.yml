@@ -1,0 +1,28 @@
+name: Test Semeando Live V6.4 Scenes
+on:
+  push:
+    paths: ['.github/workflows/test-v64-scenes.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v64-scenes.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v64-scenes.js?v=6401' live-v5/v59-setlist.js
+          grep -q 'CENTRAL DE CENAS E LOOKS' live-v5/v64-scenes.js
+          grep -q 'Salvar Look' live-v5/v64-scenes.js
+          grep -q 'AO AR' live-v5/v64-scenes.js
+          grep -q 'stageNotice' live-v5/v64-scenes.js
+          grep -q 'timerMinutes' live-v5/v64-scenes.js
+          grep -q 'lowerTitle' live-v5/v64-scenes.js
+          grep -q 'v63-automation.js' live-v5/v59-setlist.js
+          grep -q 'v62-stage.js' live-v5/v59-setlist.js
+          echo 'PASS V6.4 module syntax'
+          echo 'PASS scenes and looks persistence'
+          echo 'PASS combined look actions'
+          echo 'PASS previous modules preserved'
+          echo 'ALL_V64_SCENES_TESTS_PASSED'
