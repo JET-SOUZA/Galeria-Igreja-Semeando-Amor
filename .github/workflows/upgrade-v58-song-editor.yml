@@ -1,4 +1,4 @@
-name: Upgrade Semeando Live V5.8 Song Editor
+name: Refine Semeando Live V5.8 Song Editor
 on:
   workflow_dispatch:
   push:
@@ -7,46 +7,29 @@ on:
 permissions:
   contents: write
 jobs:
-  upgrade:
+  refine:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch V5.8 core hook
+      - name: Refresh editor after section save
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('live-v5/index.html'); s=p.read_text()
-          s=s.replace('V5.7 · CULTOS E MODELOS','V5.8 · EDITOR DE MÚSICAS')
-          old="""async function previewSong(s,bg=1){A.currentSong=s;const{data}=await sb.from('sl_song_slides').select('*').eq('song_id',s.id).order('sort_order');A.slides=data||[];A.slide=A.slides.length?0:-1;showSlides();if(A.slide>=0)setSlide(0,bg);else{A.preview=mk('song',s.title,'Letra ainda não cadastrada.',bg,'LOUVOR');render()}}"""
-          new="""async function previewSong(s,bg=1){A.currentSong=s;const{data}=await sb.from('sl_song_slides').select('*').eq('song_id',s.id).order('sort_order'),raw=data||[];if(window.SemeandoV58?.bindCore)window.SemeandoV58.bindCore({reload:()=>previewSong(A.currentSong,A.preview?.background??bg),reloadItems:()=>loadItems(),previewIndex:i=>setSlide(i,A.preview?.background??bg),goIndex:i=>takeSlide(i,A.preview?.background??bg),service:()=>A.service});A.slides=window.SemeandoV58?.arrangeSlides?await window.SemeandoV58.arrangeSlides(s,raw,A.service):raw;A.slide=A.slides.length?0:-1;showSlides();window.SemeandoV58?.afterSongLoaded?.(s,A.slides,raw,A.service);if(A.slide>=0)setSlide(0,bg);else{A.preview=mk('song',s.title,'Letra ainda não cadastrada.',bg,'LOUVOR');render()}}"""
-          if old not in s: raise SystemExit('previewSong exact source not found')
-          s=s.replace(old,new,1)
-          tag='<script src="./v58-song-editor.js"></script>'
-          if tag not in s:s=s.replace('</body>',tag+'</body>',1)
-          p.write_text(s)
+          p=Path('live-v5/v58-song-editor.js');s=p.read_text()
+          old="status58('#me58SectionStatus','Seções salvas. Recarregando música…','ok');await core58.reload?.()}catch"
+          new="status58('#me58SectionStatus','Seções salvas. Recarregando música…','ok');await core58.reload?.();draft58=current58.arrangement.length?[...current58.arrangement]:uniqueSections58(current58.raw,true);renderRows58();renderAvailable58();renderOrder58()}catch"
+          if old not in s: raise SystemExit('section refresh hook not found')
+          p.write_text(s.replace(old,new,1))
           PY
-      - name: Validate V5.8
+      - name: Validate refined V5.8
         run: |
-          grep -q 'V5.8 · EDITOR DE MÚSICAS' live-v5/index.html
-          grep -q 'v58-song-editor.js' live-v5/index.html
-          grep -q 'SemeandoV58?.arrangeSlides' live-v5/index.html
-          grep -q 'songArrangement' live-v5/v58-song-editor.js
-          grep -q 'Organizar música' live-v5/v58-song-editor.js
+          grep -q 'renderAvailable58();renderOrder58()' live-v5/v58-song-editor.js
           node --check live-v5/v58-song-editor.js
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          s=Path('live-v5/index.html').read_text()
-          scripts=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',s,re.S)
-          inline=[x for x in scripts if x.strip()]
-          core=max(inline,key=len)
-          Path('/tmp/v58-core.js').write_text(core)
-          PY
-          node --check /tmp/v58-core.js
-      - name: Commit V5.8 hook
+          grep -q 'SemeandoV58?.arrangeSlides' live-v5/index.html
+      - name: Commit refinement
         run: |
           git config user.name 'Legacy desenvolvedor'
           git config user.email '103953894+JET-SOUZA@users.noreply.github.com'
-          git add live-v5/index.html
-          git commit -m 'Upgrade Semeando Live to V5.8 music editor'
+          git add live-v5/v58-song-editor.js
+          git commit -m 'Refresh V5.8 editor after section save'
           git push
