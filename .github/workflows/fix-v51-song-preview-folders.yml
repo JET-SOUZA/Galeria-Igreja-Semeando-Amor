@@ -1,0 +1,57 @@
+name: Fix V5.1 song preview and folders
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-v51-song-preview-folders.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch preview and song folders
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('live-v5/index.html')
+          s=p.read_text()
+          old=""".song .acts{display:flex;gap:5px}.songNow{"""
+          new=""".song .acts{display:flex;gap:5px}.songFolders{display:flex;gap:6px;overflow-x:auto;margin:0 0 10px}.songFolder{border:1px solid var(--line);background:#11161f;border-radius:999px;padding:8px 12px;font-size:10px;font-weight:850;white-space:nowrap}.songFolder.active{border-color:var(--o);background:#2a160b;color:#ffb57e}.songNow{"""
+          if old not in s: raise SystemExit('css anchor missing')
+          s=s.replace(old,new,1)
+          old='''<div id="songList" class="cards"></div><div id="songNow"'''
+          new='''<div id="songFolders" class="songFolders"></div><div id="songList" class="cards"></div><div id="songNow"'''
+          if old not in s: raise SystemExit('html anchor missing')
+          s=s.replace(old,new,1)
+          old="""let A={profile:null,service:null,items:[],songs:[],slides:[],slide:-1,recent:[],currentSong:null,channel:'audience',rev:0,history:[],preview:mk('welcome'),live:mk('blank','','',1,'')};"""
+          new="""let A={profile:null,service:null,items:[],songs:[],slides:[],slide:-1,recent:[],currentSong:null,channel:'audience',rev:0,history:[],preview:mk('welcome'),live:mk('blank','','',1,'')},songFolder='TODAS';"""
+          if old not in s: raise SystemExit('state anchor missing')
+          s=s.replace(old,new,1)
+          start=s.index("function songs(f=''){")
+          end=s.index("async function previewSong",start)
+          fn="""function songBucket(t=''){const c=String(t).trim().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').charAt(0).toUpperCase();if(c>='A'&&c<='F')return'A–F';if(c>='G'&&c<='L')return'G–L';if(c>='M'&&c<='R')return'M–R';return'S–Z'}function songs(f=''){const box=$('#songList'),folders=$('#songFolders'),q=f.toLowerCase(),groups=['TODAS','A–F','G–L','M–R','S–Z'];folders.innerHTML='';groups.forEach(g=>{const b=document.createElement('button');b.className='songFolder'+(songFolder===g?' active':'');b.type='button';b.textContent=g==='TODAS'?'📁 Todas':'📁 '+g;b.onclick=()=>{songFolder=g;songs($('#songSearch')?.value||'')};folders.appendChild(b)});box.innerHTML='';A.songs.filter(s=>`${s.title} ${s.artist||''}`.toLowerCase().includes(q)&&(songFolder==='TODAS'||songBucket(s.title)===songFolder)).forEach(s=>{const d=document.createElement('div');d.className='song';d.innerHTML=`<div><b>${esc(s.title)}</b><small>${esc(s.artist||'Sem artista')}${s.key_signature?' · Tom '+esc(s.key_signature):''}</small></div><div class=\"acts\"><button class=\"btn pv\" type=\"button\">Prévia</button><button class=\"btn add\" type=\"button\">＋ Roteiro</button></div>`;d.querySelector('.pv').onclick=async()=>{d.querySelector('.pv').textContent='Abrindo…';try{await previewSong(s)}finally{d.querySelector('.pv').textContent='Prévia'}};d.querySelector('.add').onclick=()=>addSong(s);box.appendChild(d)});if(!box.children.length)box.innerHTML='<span class=\"hint\">Nenhum louvor encontrado nesta pasta.</span>'}"""
+          s=s[:start]+fn+s[end:]
+          old="""label=s.label||('Parte '+(i+1)),first=String(s.body||'').split('\\n').find(x=>x.trim())||'',generic=/^parte\\s+\\d+$/i.test(label);"""
+          new="""const label=s.label||('Parte '+(i+1)),first=String(s.body||'').split('\\n').find(x=>x.trim())||'',generic=/^parte\\s+\\d+$/i.test(label);"""
+          if old not in s: raise SystemExit('preview bug anchor missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - name: Validate
+        run: |
+          grep -q "const label=s.label" live-v5/index.html
+          grep -q 'id="songFolders"' live-v5/index.html
+          grep -q "songBucket" live-v5/index.html
+          grep -q "Abrindo…" live-v5/index.html
+      - name: Commit
+        run: |
+          git config user.name 'Semeando Live Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add live-v5/index.html
+          git commit -m 'Fix song preview and organize song folders'
+          git push
