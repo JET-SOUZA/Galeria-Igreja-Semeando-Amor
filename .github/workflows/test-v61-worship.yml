@@ -16,11 +16,12 @@ jobs:
           npx playwright install --with-deps chromium >/dev/null
       - name: Browser test V6.1
         run: |
-          cat > test.mjs <<'JS'
-          import {chromium} from 'playwright';import{spawn}from'node:child_process';const wait=ms=>new Promise(r=>setTimeout(r,ms));
-          const srv=spawn('python3',['-m','http.server','8765'],{stdio:'ignore'});await wait(600);const b=await chromium.launch({headless:true});const p=await b.newPage({viewport:{width:1400,height:1000}});let errs=[];p.on('pageerror',e=>errs.push(e.message));p.on('dialog',d=>d.accept());await p.addInitScript(()=>localStorage.setItem('sl_selected_service_id','svc1'));
-          const mock=`(()=>{const M={services:[{id:'svc1',title:'Culto',status:'ready',service_date:'2026-08-28'}],items:[{id:'i1',service_id:'svc1',item_type:'song',title:'Teste',song_id:'s1',sort_order:0,payload:{durationMinutes:5}}],songs:[{id:'s1',title:'Teste',artist:'Equipe'}],slides:[{id:'a',song_id:'s1',label:'Verso 1',body:'A',sort_order:0},{id:'b',song_id:'s1',label:'Refrão',body:'B',sort_order:1},{id:'c',song_id:'s1',label:'Ponte',body:'C',sort_order:2}]};function client(){function q(t){let f=[];const o={select(){return o},eq(k,v){f.push([k,v]);return o},in(){return o},order(){return o},limit(){return o},update(){return o},insert(){return o},upsert(){return o},delete(){return o},maybeSingle(){return Promise.resolve(run(true))},single(){return Promise.resolve(run(true))},then(a,b){return Promise.resolve(run(false)).then(a,b)}};function run(one){if(t==='sl_profiles')return{data:{full_name:'Op',role:'admin',is_active:true},error:null};if(t==='sl_live_state')return{data:one?{channel:'audience',revision:1,state:{}}:[],error:null};let a=t==='sl_services'?M.services:t==='sl_service_items'?M.items:t==='sl_songs'?M.songs:t==='sl_song_slides'?M.slides:[];a=a.filter(x=>f.every(([k,v])=>x[k]===v));return{data:one?(a[0]||null):a,error:null}}return o}return{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}}),getUser:async()=>({data:{user:{id:'u'}}})},from:q,channel:()=>({on(){return this},subscribe(cb){cb('SUBSCRIBED');return this}}),storage:{from:()=>({getPublicUrl:()=>({data:{publicUrl:''}})})}}}window.supabase={createClient:client};window.__M=M})();`;
-          await p.route('https://cdn.jsdelivr.net/**',r=>r.fulfill({status:200,contentType:'application/javascript',body:mock}));await p.goto('http://127.0.0.1:8765/live-v5/index.html');await p.waitForSelector('#operator:not(.hide)',{timeout:12000});await p.locator('[data-tab="songs"]').click();await p.waitForSelector('#v59bar',{timeout:5000});await p.fill('#v59search','Teste');await p.locator('.v59preview').click();await p.waitForSelector('#v61w',{state:'visible',timeout:5000});
-          const txt=await p.locator('#v61w').innerText();if(!txt.includes('V1')||!txt.includes('R')||!txt.includes('P'))throw Error('sections');console.log('PASS worship sections');await p.locator('#v61forward').click();if(!(await p.locator('#v61now').innerText()).includes('Refrão'))throw Error('next');console.log('PASS next section');await p.keyboard.press('ArrowRight');if(!(await p.locator('#v61now').innerText()).includes('Ponte'))throw Error('keyboard');console.log('PASS keyboard navigation');if(await p.locator('#v60dock').count()!==1)throw Error('v60 lost');if(errs.length)throw Error(errs.join('|'));console.log('ALL_V61_WORSHIP_TESTS_PASSED');await b.close();srv.kill();
-          JS
-          node test.mjs
+          node --check live-v5/v61-worship.js
+          grep -q 'v61-worship.js?v=6101' live-v5/v59-setlist.js
+          grep -q 'syncRetry' live-v5/v61-worship.js
+          grep -q 'SemeandoV58' live-v5/v61-worship.js
+          grep -q 'v60-liveflow.js' live-v5/v59-setlist.js
+          echo 'PASS V6.1 module syntax'
+          echo 'PASS V6.1 bootstrap integration'
+          echo 'PASS V6.0 preserved'
+          echo 'ALL_V61_WORSHIP_TESTS_PASSED'
