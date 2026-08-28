@@ -1,0 +1,93 @@
+name: Upgrade Semeando Live V5.5 Media Library
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/upgrade-v55-media-library.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch V5.5
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('live-v5/index.html')
+          s=p.read_text()
+
+          css='''.mediaLibraryCard{grid-column:1/-1}.mediaUploadRow{display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(130px,.7fr) auto;gap:7px;align-items:end}.mediaFileInput{width:100%;border:1px dashed #3b4656;border-radius:11px;background:#0b0f15;padding:10px;color:#cbd3df;font-size:10px}.mediaLibraryFolders{display:flex;gap:6px;overflow-x:auto;margin:10px 0}.mediaLibraryFolder{border:1px solid var(--line);background:#11161f;border-radius:999px;padding:7px 10px;font-size:9px;font-weight:900;white-space:nowrap}.mediaLibraryFolder.active{border-color:var(--o);background:#2a160b;color:#ffb57e}.mediaLibraryGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:9px}.mediaAsset{border:1px solid var(--line);background:#0d1219;border-radius:12px;overflow:hidden}.mediaThumb{aspect-ratio:16/9;background:#07090d;position:relative;overflow:hidden}.mediaThumb img,.mediaThumb video{width:100%;height:100%;object-fit:cover;display:block}.mediaType{position:absolute;left:7px;top:7px;border-radius:999px;background:#000b;padding:4px 6px;font-size:7px;font-weight:950;letter-spacing:.08em}.mediaAssetBody{padding:8px}.mediaAssetTitle{display:flex;align-items:center;gap:6px}.mediaAssetTitle b{font-size:10px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mediaFav{border:0;background:transparent;font-size:16px;padding:0 2px;color:#6f7885}.mediaFav.on{color:#ffb34f}.mediaMeta{font-size:8px;color:var(--mut);margin:3px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mediaAssetActions{display:grid;grid-template-columns:1fr 1fr auto;gap:5px}.mediaAssetActions button{font-size:8px;padding:7px 6px}.mediaEmpty{grid-column:1/-1;border:1px dashed var(--line);border-radius:12px;padding:20px;text-align:center;color:var(--mut);font-size:10px}.screenVideo,.outVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.screenVideo{z-index:0}.screen .shade{z-index:1}.screen .screenText{z-index:2}.outVideo{z-index:0}.outShade{z-index:1}.outText{z-index:2}.outLower,.countdownOverlay,.stage{z-index:4}@media(max-width:760px){.mediaUploadRow{grid-template-columns:1fr}.mediaLibraryGrid{grid-template-columns:1fr 1fr}.mediaAssetActions{grid-template-columns:1fr 1fr}.mediaAssetActions .delMedia{grid-column:1/-1}}'''
+          s=s.replace('</style>',css+'</style>',1)
+
+          s=s.replace('V5.3 · MÍDIA + PRODUÇÃO','V5.5 · BIBLIOTECA DE MÍDIA')
+          s=s.replace('V5.4 · CONTROLE AO VIVO','V5.5 · BIBLIOTECA DE MÍDIA')
+
+          media_anchor='<section class="panel" data-panel="media"><div class="mediaGrid">'
+          library='''<section class="panel" data-panel="media"><div class="mediaGrid"><div class="mediaCard mediaLibraryCard"><h3>BIBLIOTECA DE MÍDIA</h3><div class="mediaUploadRow"><div><div class="label">Imagens ou vídeos</div><input id="mediaFiles" class="mediaFileInput" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"></div><div class="field"><label>Pasta</label><input id="mediaFolderName" value="Geral" placeholder="Ex.: Louvor"></div><button id="uploadMedia" class="take btn" type="button">＋ Enviar</button></div><div id="mediaUploadStatus" class="status"></div><div class="toolbar" style="margin-top:8px"><input id="mediaSearch" class="search" placeholder="Buscar mídia"><button id="refreshMedia" class="btn" type="button">↻ Atualizar</button><span></span></div><div id="mediaLibraryFolders" class="mediaLibraryFolders"></div><div id="mediaLibraryGrid" class="mediaLibraryGrid"></div></div>'''
+          if media_anchor not in s: raise SystemExit('media anchor missing')
+          s=s.replace(media_anchor,library,1)
+
+          s=s.replace('<div class="bg"></div><div class="shade"></div>','<div class="bg"></div><video class="screenVideo hide" muted autoplay loop playsinline></video><div class="shade"></div>',2)
+          s,n=re.subn(r'(<div id="outBg" class="outBg"></div>)',r'\1<video id="outVideo" class="outVideo hide" muted autoplay loop playsinline></video>',s,count=1)
+          if n!=1: raise SystemExit('output video anchor missing')
+
+          old_draw="function draw(el,s){el.classList.toggle('black',!!s.blackout);el.querySelector('.bg').style.background=s.imageUrl?('center/cover no-repeat url('+JSON.stringify(s.imageUrl)+')'):gradient(s.background);el.querySelector('small').textContent=s.kicker||'';el.querySelector('h2').textContent=s.title||'';el.querySelector('p').textContent=s.body||''}"
+          new_draw="function draw(el,s){el.classList.toggle('black',!!s.blackout);const bg=el.querySelector('.bg'),v=el.querySelector('.screenVideo'),vu=s.videoUrl||'';bg.style.background=s.imageUrl?('center/cover no-repeat url('+JSON.stringify(s.imageUrl)+')'):gradient(s.background);if(v){if(vu){if(v.getAttribute('src')!==vu){v.setAttribute('src',vu);v.load()}v.classList.remove('hide');bg.style.opacity='0';v.play().catch(()=>{})}else{v.pause();v.removeAttribute('src');v.classList.add('hide');bg.style.opacity='1'}}el.querySelector('small').textContent=s.kicker||'';el.querySelector('h2').textContent=s.title||'';el.querySelector('p').textContent=s.body||''}"
+          if old_draw not in s: raise SystemExit('draw anchor missing')
+          s=s.replace(old_draw,new_draw,1)
+
+          s=s.replace("const gradient=i=>","let mediaItems=[],mediaFolder='TODAS';const gradient=i=>",1)
+
+          funcs=r'''function mediaUrl(path){return sb.storage.from('sl-media').getPublicUrl(path).data.publicUrl}function mediaStatus(t,k=''){const e=$('#mediaUploadStatus');if(e){e.textContent=t;e.className='status '+k}}function renderMediaFolders(){const box=$('#mediaLibraryFolders');if(!box)return;const fs=['TODAS','FAVORITOS',...Array.from(new Set(mediaItems.map(x=>x.folder||'Geral'))).sort((a,b)=>a.localeCompare(b,'pt-BR'))];box.innerHTML='';fs.forEach(f=>{const b=document.createElement('button');b.className='mediaLibraryFolder'+(mediaFolder===f?' active':'');b.type='button';b.textContent=f==='TODAS'?'📁 Todas':f==='FAVORITOS'?'★ Favoritos':'📁 '+f;b.onclick=()=>{mediaFolder=f;renderMediaFolders();renderMediaLibrary()};box.appendChild(b)})}function renderMediaLibrary(){const box=$('#mediaLibraryGrid');if(!box)return;const q=($('#mediaSearch')?.value||'').trim().toLowerCase();box.innerHTML='';const rows=mediaItems.filter(m=>(mediaFolder==='TODAS'||(mediaFolder==='FAVORITOS'?m.is_favorite:(m.folder||'Geral')===mediaFolder))&&(`${m.name} ${m.folder||''}`.toLowerCase().includes(q)));rows.forEach(m=>{const url=mediaUrl(m.storage_path),card=document.createElement('article');card.className='mediaAsset';const isVideo=m.media_type==='video';card.innerHTML=`<div class="mediaThumb">${isVideo?`<video muted playsinline preload="metadata" src="${esc(url)}"></video>`:`<img loading="lazy" src="${esc(url)}" alt="">`}<span class="mediaType">${isVideo?'VÍDEO':'IMAGEM'}</span></div><div class="mediaAssetBody"><div class="mediaAssetTitle"><b title="${esc(m.name)}">${esc(m.name)}</b><button class="mediaFav${m.is_favorite?' on':''}" type="button" title="Favorito">★</button></div><div class="mediaMeta">${esc(m.folder||'Geral')}</div><div class="mediaAssetActions"><button class="btn pvMedia" type="button">Preview</button><button class="take liveMedia" type="button">AO AR</button><button class="btn danger delMedia" type="button">Excluir</button></div></div>`;card.querySelector('.pvMedia').onclick=()=>applyLibraryMedia(m,false);card.querySelector('.liveMedia').onclick=()=>applyLibraryMedia(m,true);card.querySelector('.mediaFav').onclick=()=>toggleMediaFavorite(m);card.querySelector('.delMedia').onclick=()=>deleteMedia(m);box.appendChild(card)});if(!rows.length)box.innerHTML='<div class="mediaEmpty">Nenhuma mídia nesta pasta. Use “Enviar” para adicionar imagens ou vídeos.</div>'}async function loadMediaLibrary(){const{data,error}=await sb.from('sl_media').select('*').order('created_at',{ascending:false});if(error){mediaStatus('Não foi possível carregar a biblioteca.','bad');return}mediaItems=data||[];renderMediaFolders();renderMediaLibrary()}async function applyLibraryMedia(m,goLive=false){const url=mediaUrl(m.storage_path);if(m.media_type==='video')A.preview={...A.preview,videoUrl:url,imageUrl:''};else A.preview={...A.preview,imageUrl:url,videoUrl:''};render();mediaStatus((m.media_type==='video'?'Vídeo':'Imagem')+' preparado'+(goLive?' e enviado ao ar.': ' no Preview.'),'ok');if(goLive)await take()}async function toggleMediaFavorite(m){const next=!m.is_favorite,{error}=await sb.from('sl_media').update({is_favorite:next,updated_at:new Date().toISOString()}).eq('id',m.id);if(!error){m.is_favorite=next;renderMediaFolders();renderMediaLibrary()}}function safeMediaPart(x=''){return String(x).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80)||'arquivo'}async function uploadMediaFiles(){const input=$('#mediaFiles'),files=[...(input?.files||[])];if(!files.length)return mediaStatus('Selecione pelo menos um arquivo.','bad');const folder=($('#mediaFolderName')?.value||'Geral').trim()||'Geral',folderPath=safeMediaPart(folder);let done=0;for(const file of files){if(file.size>104857600){mediaStatus(file.name+' ultrapassa 100 MB.','bad');continue}const isVideo=file.type.startsWith('video/'),isImage=file.type.startsWith('image/');if(!isVideo&&!isImage){mediaStatus(file.name+' não é imagem/vídeo compatível.','bad');continue}mediaStatus('Enviando '+file.name+'…');const path=folderPath+'/'+Date.now()+'-'+Math.random().toString(36).slice(2,8)+'-'+safeMediaPart(file.name),up=await sb.storage.from('sl-media').upload(path,file,{cacheControl:'3600',upsert:false,contentType:file.type});if(up.error){mediaStatus('Falha ao enviar '+file.name+'.','bad');continue}const ins=await sb.from('sl_media').insert({name:file.name,folder,media_type:isVideo?'video':'image',mime_type:file.type,storage_path:up.data.path});if(ins.error){await sb.storage.from('sl-media').remove([up.data.path]);mediaStatus('Arquivo enviado, mas não foi possível cadastrá-lo.','bad');continue}done++}if(input)input.value='';await loadMediaLibrary();mediaStatus(done+' arquivo(s) adicionado(s) à biblioteca.',done?'ok':'bad')}async function deleteMedia(m){if(!confirm('Excluir “'+m.name+'” da biblioteca?'))return;const r=await sb.storage.from('sl-media').remove([m.storage_path]);if(r.error)return mediaStatus('Não foi possível excluir o arquivo.','bad');const d=await sb.from('sl_media').delete().eq('id',m.id);if(d.error)return mediaStatus('Arquivo removido, mas houve erro ao atualizar a biblioteca.','bad');mediaItems=mediaItems.filter(x=>x.id!==m.id);renderMediaFolders();renderMediaLibrary();mediaStatus('Mídia excluída.','ok')}'''
+          anchor='function renderMediaPresets()'
+          if anchor not in s: raise SystemExit('renderMediaPresets anchor missing')
+          s=s.replace(anchor,funcs+anchor,1)
+
+          s=s.replace("A.preview={...A.preview,background:i,imageUrl:''};","A.preview={...A.preview,background:i,imageUrl:'',videoUrl:''};")
+          s=s.replace("A.preview={...A.preview,imageUrl:url};","A.preview={...A.preview,imageUrl:url,videoUrl:''};")
+          s=s.replace("A.preview={...A.preview,imageUrl:''};render();await publish(A.channel,{...A.live,imageUrl:''},'image-bg-clear')","A.preview={...A.preview,imageUrl:'',videoUrl:''};render();await publish(A.channel,{...A.live,imageUrl:'',videoUrl:''},'image-bg-clear')")
+
+          old_apply="function apply(s={}){root.classList.toggle('outBlack',!!s.blackout);$('#outBg').style.background=s.imageUrl?('center/cover no-repeat url('+JSON.stringify(s.imageUrl)+')'):gradient(s.background);$('#outKicker')"
+          new_apply="function apply(s={}){root.classList.toggle('outBlack',!!s.blackout);const ob=$('#outBg'),ov=$('#outVideo'),vu=s.videoUrl||'';ob.style.background=s.imageUrl?('center/cover no-repeat url('+JSON.stringify(s.imageUrl)+')'):gradient(s.background);if(vu){if(ov.getAttribute('src')!==vu){ov.setAttribute('src',vu);ov.load()}ov.classList.remove('hide');ob.style.opacity='0';ov.play().catch(()=>{})}else{ov.pause();ov.removeAttribute('src');ov.classList.add('hide');ob.style.opacity='1'}$('#outKicker')"
+          if old_apply not in s: raise SystemExit('output apply anchor missing')
+          s=s.replace(old_apply,new_apply,1)
+
+          setup_anchor="renderMediaPresets();setupQuickScenes();"
+          if setup_anchor not in s: raise SystemExit('setup media anchor missing')
+          s=s.replace(setup_anchor,"$('#uploadMedia').onclick=uploadMediaFiles;$('#refreshMedia').onclick=loadMediaLibrary;$('#mediaSearch').oninput=renderMediaLibrary;"+setup_anchor,1)
+
+          op_anchor='await loadItems();await loadSongs();await loadLive();'
+          if op_anchor not in s: raise SystemExit('op load anchor missing')
+          s=s.replace(op_anchor,'await loadItems();await loadSongs();await loadMediaLibrary();await loadLive();',1)
+
+          p.write_text(s)
+          PY
+      - name: Validate V5.5
+        run: |
+          grep -q 'BIBLIOTECA DE MÍDIA' live-v5/index.html
+          grep -q 'uploadMediaFiles' live-v5/index.html
+          grep -q "storage.from('sl-media')" live-v5/index.html
+          grep -q 'screenVideo' live-v5/index.html
+          grep -q 'outVideo' live-v5/index.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('live-v5/index.html').read_text()
+          scripts=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',s,re.S)
+          inline=[x for x in scripts if x.strip()]
+          Path('/tmp/v55.js').write_text(inline[-1])
+          PY
+          node --check /tmp/v55.js
+      - name: Commit V5.5
+        run: |
+          git config user.name 'Legacy desenvolvedor'
+          git config user.email '103953894+JET-SOUZA@users.noreply.github.com'
+          git add live-v5/index.html
+          git commit -m 'Upgrade Semeando Live to V5.5 media library'
+          git push
