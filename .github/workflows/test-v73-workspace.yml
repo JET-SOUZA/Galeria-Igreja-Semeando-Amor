@@ -1,0 +1,21 @@
+name: Test Semeando Live V7.3 Workspace
+on:
+  push:
+    paths: ['.github/workflows/test-v73-workspace.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v73-workspace.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v73-workspace.js?v=7301' live-v5/v59-setlist.js
+          grep -q 'V7.3 · WORKSPACE UNIFICADO' live-v5/v59-setlist.js
+          grep -q 'Operação principal em uma única tela' live-v5/v73-workspace.js
+          grep -q 'Ocultar painéis antigos' live-v5/v73-workspace.js
+          grep -q 'TRANSMISSÃO' live-v5/v73-workspace.js
+          grep -q 'v72-preflight.js' live-v5/v59-setlist.js
+          echo 'ALL_V73_WORKSPACE_TESTS_PASSED'
