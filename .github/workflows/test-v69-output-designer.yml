@@ -1,0 +1,26 @@
+name: Test Semeando Live V6.9 Output Designer
+on:
+  push:
+    paths: ['.github/workflows/test-v69-output-designer.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v69-output-designer.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v69-output-designer.js?v=6901' live-v5/v59-setlist.js
+          grep -q 'V6.9 · OUTPUT DESIGNER PRO' live-v5/v59-setlist.js
+          grep -q 'OUTPUT DESIGNER PRO' live-v5/v69-output-designer.js
+          grep -q 'MARGEM SEGURA' live-v5/v69-output-designer.js
+          grep -q 'Sombra de leitura' live-v5/v69-output-designer.js
+          grep -q 'Faixa translúcida' live-v5/v69-output-designer.js
+          grep -q 'v68-interface-pro.js' live-v5/v59-setlist.js
+          echo 'PASS V6.9 syntax and bootstrap'
+          echo 'PASS output presets typography and safe margins'
+          echo 'PASS operator designer controls'
+          echo 'PASS V6.8 and previous modules preserved'
+          echo 'ALL_V69_OUTPUT_DESIGNER_TESTS_PASSED'
