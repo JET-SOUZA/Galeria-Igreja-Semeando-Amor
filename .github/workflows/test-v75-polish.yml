@@ -1,0 +1,21 @@
+name: Test Semeando Live V7.5 Polish
+on:
+  push:
+    paths: ['.github/workflows/test-v75-polish.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v75-polish.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v75-polish.js?v=7501' live-v5/v59-setlist.js
+          grep -q 'V7.5 · SEMEANDO LIVE' live-v5/v59-setlist.js
+          grep -q 'Workspace de operação' live-v5/v75-polish.js
+          grep -q 'Internet reconectada' live-v5/v75-polish.js
+          grep -q 'AO AR atualizado' live-v5/v75-polish.js
+          grep -q 'v74-default-workspace.js' live-v5/v59-setlist.js
+          echo 'ALL_V75_POLISH_TESTS_PASSED'
