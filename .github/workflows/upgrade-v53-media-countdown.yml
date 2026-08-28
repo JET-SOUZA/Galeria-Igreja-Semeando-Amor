@@ -1,0 +1,77 @@
+name: Upgrade Semeando Live V5.3 Media Countdown
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/upgrade-v53-media-countdown.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch V5.3
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('live-v5/index.html')
+          s=p.read_text()
+          def rep(a,b):
+              global s
+              if a not in s: raise SystemExit('anchor missing: '+a[:120])
+              s=s.replace(a,b,1)
+
+          css='''.mediaGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mediaCard{border:1px solid var(--line);background:#10151d;border-radius:13px;padding:12px}.mediaCard h3{margin:0 0 9px;font-size:11px;letter-spacing:.06em}.bgPresets{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.bgPreset{aspect-ratio:16/9;border:2px solid transparent;border-radius:10px;overflow:hidden;position:relative}.bgPreset.active{border-color:var(--o)}.bgPreset span{position:absolute;left:6px;bottom:5px;font-size:8px;font-weight:900;text-shadow:0 1px 7px #000}.countdownRead{font-size:34px;font-weight:950;letter-spacing:.05em;margin:5px 0 10px}.countdownOverlay{position:absolute;inset:0;display:grid;place-content:center;text-align:center;pointer-events:none}.countdownOverlay small{font-size:clamp(16px,1.5vw,28px);letter-spacing:.14em;font-weight:900;color:#ffd0ae}.countdownOverlay b{font-size:clamp(70px,10vw,180px);line-height:1;margin-top:14px;text-shadow:0 5px 40px #000}.countdownOverlay.hide{display:none}.mediaHint{font-size:9px;color:var(--mut);line-height:1.45;margin-top:8px}.quickScenes{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.quickScene{border:1px solid var(--line);background:#11161f;border-radius:10px;padding:10px;text-align:left}.quickScene b{font-size:10px}.quickScene small{display:block;color:var(--mut);font-size:8px;margin-top:3px}@media(max-width:760px){.mediaGrid{grid-template-columns:1fr}.bgPresets{grid-template-columns:repeat(2,1fr)}.quickScenes{grid-template-columns:1fr 1fr}}'''
+          rep('</style>',css+'</style>')
+
+          rep('<button class="tab" data-tab="production">Produção</button></nav>', '<button class="tab" data-tab="production">Produção</button><button class="tab" data-tab="media">Mídia</button></nav>')
+
+          media='''<section class="panel" data-panel="media"><div class="mediaGrid"><div class="mediaCard"><h3>FUNDOS RÁPIDOS</h3><div id="bgPresets" class="bgPresets"></div><div class="field"><label>Imagem personalizada (URL)</label><input id="mediaImageUrl" placeholder="https://..."></div><div class="prodActions"><button id="previewImageBg" class="btn" type="button">Preview</button><button id="liveImageBg" class="take" type="button">AO AR</button><button id="clearImageBg" class="btn danger" type="button">Remover</button></div><div class="mediaHint">Use imagens 16:9 em alta resolução. A imagem fica atrás da letra, Bíblia ou aviso.</div></div><div class="mediaCard"><h3>COUNTDOWN PRÉ-CULTO</h3><div class="grid2"><div class="field"><label>Minutos</label><input id="countdownMinutes" type="number" min="1" max="180" value="10"></div><div><div class="label">Prévia</div><div id="countdownRead" class="countdownRead">10:00</div></div></div><div class="field"><label>Mensagem</label><input id="countdownMessage" value="O culto começa em"></div><div class="prodActions"><button id="startCountdownPreview" class="btn" type="button">Preview</button><button id="startCountdownLive" class="take" type="button">AO AR</button><button id="stopCountdown" class="btn danger" type="button">Parar</button></div></div><div class="mediaCard"><h3>AVISOS PRÉ-CULTO</h3><div class="field"><label>Título</label><input id="noticeTitle" placeholder="BEM-VINDO"></div><div class="field"><label>Mensagem</label><textarea id="noticeBody" rows="4" placeholder="Acompanhe nossos avisos"></textarea></div><div class="prodActions"><button id="noticePreview" class="btn" type="button">Preview</button><button id="noticeLive" class="take" type="button">AO AR</button></div></div><div class="mediaCard"><h3>CENAS RÁPIDAS</h3><div id="quickScenes" class="quickScenes"></div></div></div></section>'''
+          rep('</div></section><aside class="pane right">', media+'</div></section><aside class="pane right">')
+
+          rep('<div id="outLower" class="outLower hide"><b id="outLowerTitle"></b><span id="outLowerSub"></span></div><span id="outHealth" class="outHealth">LOCAL</span></div>', '<div id="outLower" class="outLower hide"><b id="outLowerTitle"></b><span id="outLowerSub"></span></div><div id="countdownOverlay" class="countdownOverlay hide"><small id="countdownMsg"></small><b id="countdownValue">00:00</b></div><span id="outHealth" class="outHealth">LOCAL</span></div>')
+
+          helpers='''const mediaPresets=[0,1,2,3,4,5];let selectedMediaBg=0;function renderMediaPresets(){const box=$('#bgPresets');if(!box)return;box.innerHTML='';mediaPresets.forEach(i=>{const b=document.createElement('button');b.className='bgPreset'+(i===selectedMediaBg?' active':'');b.style.background=gradient(i);b.innerHTML='<span>Fundo '+(i+1)+'</span>';b.onclick=()=>{selectedMediaBg=i;renderMediaPresets();A.preview={...A.preview,background:i,imageUrl:''};render()};box.appendChild(b)})}function setImageBg(previewOnly=true){const url=$('#mediaImageUrl')?.value.trim()||'';A.preview={...A.preview,imageUrl:url};render();if(!previewOnly)take()}async function clearImageBg(){A.preview={...A.preview,imageUrl:''};render();await publish(A.channel,{...A.live,imageUrl:''},'image-bg-clear')}let countdownEnd=0,countdownTick=null;function fmtCountdown(end){let ms=Math.max(0,end-Date.now()),sec=Math.floor(ms/1000),m=Math.floor(sec/60),s=sec%60;return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')}function updateCountdownRead(){const e=$('#countdownRead');if(e)e.textContent=countdownEnd?fmtCountdown(countdownEnd):String(Math.max(1,Number($('#countdownMinutes')?.value||10))).padStart(2,'0')+':00'}function prepareCountdown(){const mins=Math.max(1,Math.min(180,Number($('#countdownMinutes')?.value||10)));countdownEnd=Date.now()+mins*60000;clearInterval(countdownTick);countdownTick=setInterval(updateCountdownRead,500);updateCountdownRead();A.preview={...mk('countdown','', '', selectedMediaBg,'PRE-CULTO'),countdownEnd:new Date(countdownEnd).toISOString(),countdownMessage:$('#countdownMessage')?.value.trim()||'O culto começa em'};render()}async function liveCountdown(){prepareCountdown();await take()}async function stopCountdown(){countdownEnd=0;clearInterval(countdownTick);updateCountdownRead();A.preview={...A.preview,countdownEnd:null};render();await publish(A.channel,{...A.live,countdownEnd:null},'countdown-stop')}function noticePreview(){A.slides=[];A.slide=-1;A.currentSong=null;showSlides();A.preview=mk('announcement',$('#noticeTitle')?.value.trim()||'BEM-VINDO',$('#noticeBody')?.value.trim()||'',selectedMediaBg,'AVISO');render()}async function noticeLive(){noticePreview();await take()}function setupQuickScenes(){const box=$('#quickScenes');if(!box)return;const rows=[['Boas-vindas','welcome'],['Louvor','worship'],['Palavra','word'],['Oferta','offering'],['Avisos','announcement'],['Encerramento','closing']];box.innerHTML='';rows.forEach(([n,t])=>{const m=macros.find(x=>x[3]===t);const b=document.createElement('button');b.className='quickScene';b.innerHTML='<b>'+n+'</b><small>Preparar cena</small>';b.onclick=()=>{if(!m)return;A.preview=mk(m[3],m[1],m[2],m[4],m[1]);selectedMediaBg=m[4];renderMediaPresets();render()};box.appendChild(b)})}'''
+          rep('function tabs(){',helpers+'function tabs(){')
+
+          rep("$('#prodUndo').onclick=undo;", "$('#prodUndo').onclick=undo;renderMediaPresets();setupQuickScenes();$('#previewImageBg').onclick=()=>setImageBg(true);$('#liveImageBg').onclick=()=>setImageBg(false);$('#clearImageBg').onclick=clearImageBg;$('#countdownMinutes').oninput=updateCountdownRead;$('#startCountdownPreview').onclick=prepareCountdown;$('#startCountdownLive').onclick=liveCountdown;$('#stopCountdown').onclick=stopCountdown;$('#noticePreview').onclick=noticePreview;$('#noticeLive').onclick=noticeLive;")
+
+          rep("el.querySelector('.bg').style.background=gradient(s.background);", "el.querySelector('.bg').style.background=s.imageUrl?('center/cover no-repeat url('+JSON.stringify(s.imageUrl)+')'):gradient(s.background);")
+          rep("$('#outBg').style.background=gradient(s.background);", "$('#outBg').style.background=s.imageUrl?('center/cover no-repeat url('+JSON.stringify(s.imageUrl)+')'):gradient(s.background);")
+
+          rep("const lt=s.lowerThird||{};$('#outLower').classList.toggle('hide',!lt.visible||!lt.title);$('#outLowerTitle').textContent=lt.title||'';$('#outLowerSub').textContent=lt.subtitle||''}", "const lt=s.lowerThird||{};$('#outLower').classList.toggle('hide',!lt.visible||!lt.title);$('#outLowerTitle').textContent=lt.title||'';$('#outLowerSub').textContent=lt.subtitle||'';const co=$('#countdownOverlay');const ce=s.countdownEnd?Date.parse(s.countdownEnd):0;co.classList.toggle('hide',!ce);$('#countdownMsg').textContent=s.countdownMessage||'O culto começa em';co.dataset.end=String(ce||0)}")
+          rep("const e=$('#stageTimer');if(e){let ms=outTimerEnd?outTimerEnd-Date.now():0;if(ms<0)ms=0;const sec=Math.floor(ms/1000),m=Math.floor(sec/60),x=sec%60;e.textContent=outTimerEnd?(String(m).padStart(2,'0')+':'+String(x).padStart(2,'0')):'--:--'}", "const e=$('#stageTimer');if(e){let ms=outTimerEnd?outTimerEnd-Date.now():0;if(ms<0)ms=0;const sec=Math.floor(ms/1000),m=Math.floor(sec/60),x=sec%60;e.textContent=outTimerEnd?(String(m).padStart(2,'0')+':'+String(x).padStart(2,'0')):'--:--'}const co=$('#countdownOverlay'),cv=$('#countdownValue');if(co&&cv&&!co.classList.contains('hide')){const end=Number(co.dataset.end||0);cv.textContent=end?fmtCountdown(end):'00:00'}")
+
+          rep('V5.2 · PRODUÇÃO AO VIVO','V5.3 · MÍDIA + PRODUÇÃO')
+          rep('<small>V5.2</small></div><div class="rightBody">','<small>V5.3</small></div><div class="rightBody">')
+          p.write_text(s)
+          PY
+      - name: Static validation
+        run: |
+          grep -q 'data-panel="media"' live-v5/index.html
+          grep -q 'id="countdownOverlay"' live-v5/index.html
+          grep -q 'id="bgPresets"' live-v5/index.html
+          grep -q 'V5.3 · MÍDIA + PRODUÇÃO' live-v5/index.html
+          python - <<'PY'
+          import re,pathlib,subprocess
+          s=pathlib.Path('live-v5/index.html').read_text()
+          js=re.findall(r'<script>([\s\S]*?)</script>',s)[-1]
+          p=pathlib.Path('/tmp/check.js');p.write_text('new Function('+repr(js)+');')
+          subprocess.run(['node',str(p)],check=True)
+          ids=set(re.findall(r'id="([^"]+)"',s))
+          needed={'take','prev','next','clear','black','undo','songSearch','previewLower','liveLower','startTimer','startCountdownPreview','startCountdownLive','noticePreview','noticeLive','previewImageBg','liveImageBg'}
+          missing=needed-ids
+          if missing: raise SystemExit('missing ids: '+str(missing))
+          print('static validation ok')
+          PY
+      - name: Commit V5.3
+        run: |
+          git config user.name 'Semeando Live Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add live-v5/index.html
+          git commit -m 'Upgrade Semeando Live to V5.3 media countdown' || exit 0
+          git push
