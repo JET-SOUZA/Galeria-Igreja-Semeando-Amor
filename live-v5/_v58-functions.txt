@@ -1,0 +1,24 @@
+
+===== function showSlides =====
+function showSlides(){const box=$('#slides'),map=$('#songMap'),now=$('#songNow');box.innerHTML='';map.innerHTML='';if(!A.slides.length){now.classList.add('hide');return}now.classList.remove('hide');$('#songNowTitle').textContent=A.currentSong?.title||'Louvor';$('#songNowMeta').textContent=[A.currentSong?.artist,A.currentSong?.key_signature?'Tom '+A.currentSong.key_signature:null,A.slides.length+' partes'].filter(Boolean).join(' · ');A.slides.forEach((s,i)=>{const live=A.live?.type==='song'&&A.live?.title===s.body,j=document.createElement('button');j.className='songJump'+(i===A.slide?' active':'')+(live?' live':'');const label=s.label||('Parte '+(i+1)),first=String(s.body||'').split('\n').find(x=>x.trim())||'',generic=/^parte\s+\d+$/i.test(label);j.textContent=(generic?String(i+1):shortLabel(label,i))+(first?' · '+first.slice(0,26):'');j.title=label+(first?' — '+first:'');j.onclick=()=>setSlide(i,A.preview.background);map.appendChild(j);const card=document.createElement('div');card.className='slide'+(i===A.slide?' active':'')+(live?' liveSlide':'');card.innerHTML=`<div class="slideHead"><b>${esc(s.label||('Parte '+(i+1)))}</b><small>${String(i+1).padStart(2,'0')}</small></div><p>${esc(s.body)}</p><div class="slideBtns"><button class="previewSlide" type="button">PREVIEW</button><button class="goSlide" type="button">AO AR</button></div>`;card.querySelector('.previewSlide').onclick=()=>setSlide(i,A.preview.background);card.querySelector('.goSlide').onclick=()=>takeSlide(i,A.preview.background);card.ondblclick=e=>{if(!e.target.closest('button'))takeSlide(i,A.preview.background)};box.appendChild(card)})}
+
+===== async function previewSong =====
+async function previewSong(s,bg=1){A.currentSong=s;const{data}=await sb.from('sl_song_slides').select('*').eq('song_id',s.id).order('sort_order');A.slides=data||[];A.slide=A.slides.length?0:-1;showSlides();if(A.slide>=0)setSlide(0,bg);else{A.preview=mk('song',s.title,'Letra ainda não cadastrada.',bg,'LOUVOR');render()}}
+
+===== function takeSlide =====
+function takeSlide(i,bg=1){setSlide(i,bg);await take();showSlides()}
+
+===== function showSongs =====
+NOT FOUND: function showSongs
+
+===== function renderSongs =====
+NOT FOUND: function renderSongs
+
+===== async function loadItems =====
+async function loadItems(){const{data}=await sb.from('sl_service_items').select('*').eq('service_id',A.service.id).order('sort_order');A.items=data||[];rundown()}
+
+===== function renderRundown =====
+NOT FOUND: function renderRundown
+
+===== function paint =====
+NOT FOUND: function paint
