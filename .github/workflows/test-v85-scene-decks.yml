@@ -1,0 +1,20 @@
+name: Test Semeando Live V8.5 Scene Decks
+on:
+  push:
+    paths: ['.github/workflows/test-v85-scene-decks.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v85-scene-decks.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v85-scene-decks.js?v=8501' live-v5/v59-setlist.js
+          grep -q 'SEQUÊNCIA DO LOUVOR' live-v5/v85-scene-decks.js
+          grep -q 'COLUNAS / CENAS' live-v5/v85-scene-decks.js
+          grep -q 'ARRASTE PARA REORDENAR' live-v5/v85-scene-decks.js
+          grep -q 'sl_v85_scenes' live-v5/v85-scene-decks.js
+          echo ALL_V85_SCENE_DECKS_TESTS_PASSED
