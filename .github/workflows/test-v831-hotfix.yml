@@ -1,0 +1,23 @@
+name: Test Semeando Live V8.3.1 Hotfix
+on:
+  push:
+    paths: ['.github/workflows/test-v831-hotfix.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v66-live-mode.js
+          node --check live-v5/v67-remote.js
+          node --check live-v5/v68-interface-pro.js
+          node --check live-v5/v59-setlist.js
+          grep -q "v66-live-mode.js?v=6602" live-v5/v59-setlist.js
+          grep -q "v67-remote.js?v=6702" live-v5/v59-setlist.js
+          grep -q "v68-interface-pro.js?v=6802" live-v5/v59-setlist.js
+          grep -q "body.v80-on #v66entry" live-v5/v66-live-mode.js
+          grep -q "body.v80-on #v67entry" live-v5/v67-remote.js
+          grep -q "body.v80-on #v68quick" live-v5/v68-interface-pro.js
+          echo ALL_V831_HOTFIX_TESTS_PASSED
