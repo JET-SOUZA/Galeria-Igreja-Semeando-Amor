@@ -18,3 +18,4 @@ jobs:
           grep -q 'v93overlay' live-v5/v93-composition-preview.js
           grep -q 'COMPOSITION' live-v5/v93-composition-preview.js
           echo ALL_V93_COMPOSITION_PREVIEW_TESTS_PASSED
+# rerun after syntax fix
