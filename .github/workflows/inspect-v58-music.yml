@@ -11,23 +11,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Extract music core snippets
+      - name: Extract exact music functions
         run: |
           python3 - <<'PY'
           from pathlib import Path
           s=Path('live-v5/index.html').read_text()
-          needles=['data-tab="songs"','data-panel="songs"','id="songNow"','function showSlides','async function previewSong','function takeSlide','function renderSongs','function showSongs','sl_song_slides','async function loadItems','function renderRundown','function paint']
-          out=[]
-          for n in needles:
-              i=s.find(n)
-              out.append('\n===== '+n+' @ '+str(i)+' =====\n')
-              if i>=0: out.append(s[max(0,i-1800):min(len(s),i+6500)])
-          Path('live-v5/_v58-snippets.txt').write_text(''.join(out))
+          def extract(marker):
+              i=s.find(marker)
+              if i<0:return f'NOT FOUND: {marker}'
+              b=s.find('{',i); depth=0; quote=None; esc=False
+              for j in range(b,len(s)):
+                  c=s[j]
+                  if quote:
+                      if esc: esc=False
+                      elif c=='\\': esc=True
+                      elif c==quote: quote=None
+                      continue
+                  if c in "'\"`": quote=c; continue
+                  if c=='{': depth+=1
+                  elif c=='}':
+                      depth-=1
+                      if depth==0:return s[i:j+1]
+              return s[i:i+12000]
+          markers=['function showSlides','async function previewSong','function takeSlide','function showSongs','function renderSongs','async function loadItems','function renderRundown','function paint']
+          parts=[]
+          for m in markers:
+              parts.append('\n===== '+m+' =====\n'+extract(m)+'\n')
+          Path('live-v5/_v58-functions.txt').write_text(''.join(parts))
           PY
-      - name: Commit snippets
+      - name: Commit exact functions
         run: |
           git config user.name 'Legacy desenvolvedor'
           git config user.email '103953894+JET-SOUZA@users.noreply.github.com'
-          git add live-v5/_v58-snippets.txt
-          git commit -m 'Extract V5.8 music core snippets'
+          git add live-v5/_v58-functions.txt
+          git commit -m 'Extract exact V5.8 music functions'
           git push
