@@ -1,0 +1,35 @@
+name: Finalize Semeando Live V5.9
+on:
+  push:
+    paths: ['.github/workflows/finalize-v59.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Integrate V5.9
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('live-v5/index.html');s=p.read_text()
+          s=s.replace('V5.8 · EDITOR DE MÚSICAS','V5.9 · REPERTÓRIO E SETLIST')
+          if 'v59-setlist.js' not in s:
+              marker='<script src="./v58-song-editor.js"></script>'
+              if marker not in s: raise SystemExit('current V5.8 marker not found')
+              s=s.replace(marker,marker+'<script src="./v59-setlist.js?v=5902"></script>',1)
+          p.write_text(s)
+          PY
+          grep -q 'V5.9 · REPERTÓRIO E SETLIST' live-v5/index.html
+          grep -q 'v59-setlist.js?v=5902' live-v5/index.html
+          grep -q 'v58-song-editor.js' live-v5/index.html
+          node --check live-v5/v59-setlist.js
+      - name: Commit V5.9
+        run: |
+          git config user.name 'Legacy desenvolvedor'
+          git config user.email '103953894+JET-SOUZA@users.noreply.github.com'
+          git add live-v5/index.html
+          git commit -m 'Complete Semeando Live V5.9 setlist integration'
+          git push
