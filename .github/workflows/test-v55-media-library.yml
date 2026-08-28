@@ -1,0 +1,41 @@
+name: Test Semeando Live V5.5 Media Library
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/test-v55-media-library.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          npm init -y >/dev/null 2>&1
+          npm i playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Browser test V5.5
+        run: |
+          cat > test-v55.mjs <<'JS'
+          import { chromium } from 'playwright';
+          import { spawn } from 'node:child_process';
+          const server=spawn('python3',['-m','http.server','8765'],{stdio:'ignore'}),wait=ms=>new Promise(r=>setTimeout(r,ms));await wait(700);
+          const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1280,height:900}}),errs=[];
+          page.on('pageerror',e=>errs.push(e.message));
+          await page.route('https://cdn.jsdelivr.net/**',async r=>r.fulfill({status:200,contentType:'application/javascript',body:`window.supabase={createClient(){let media=[{id:'m1',name:'Fundo culto.jpg',folder:'Culto',media_type:'image',mime_type:'image/jpeg',storage_path:'Culto/fundo.jpg',is_favorite:false,created_at:'2026-08-28T00:00:00Z'},{id:'m2',name:'Motion louvor.mp4',folder:'Louvor',media_type:'video',mime_type:'video/mp4',storage_path:'Louvor/motion.mp4',is_favorite:true,created_at:'2026-08-28T00:01:00Z'}];const song={id:'s1',title:'Louvor Teste',artist:'Equipe',key_signature:'G'},slides=[{id:'1',song_id:'s1',label:'Verso 1',body:'Linha 1',sort_order:0}],service={id:'svc',title:'Culto Teste',status:'live'},profile={full_name:'Operador',role:'admin',is_active:true},live={revision:1,state:{type:'welcome',title:'BEM-VINDOS',body:'Teste',background:0,kicker:'WELCOME',blackout:false}};let pending=null;const R=(t,m,p)=>t==='sl_profiles'?{data:profile,error:null}:t==='sl_services'?{data:[service],error:null}:t==='sl_service_items'?{data:[],error:null}:t==='sl_songs'?{data:[song],error:null}:t==='sl_song_slides'?{data:slides,error:null}:t==='sl_media'?{data:media,error:null}:t==='sl_live_state'?{data:m==='update'?{revision:2,state:p||live.state}:live,error:null}:t==='sl_scripture_cache'?{data:[],error:null}:{data:[],error:null};function q(t,m='select',p=null){const o={select(){return o},eq(k,v){if(t==='sl_media'&&m==='update'){const x=media.find(z=>z[k]===v);if(x)Object.assign(x,p)}return o},in(){return o},order(){return o},limit(){return o},insert(v){if(t==='sl_media'){const row={id:'m'+(media.length+1),created_at:new Date().toISOString(),is_favorite:false,...v};media=[row,...media]}return q(t,'insert',v)},update(v){return q(t,'update',v)},upsert(v){return q(t,'upsert',v)},delete(){return q(t,'delete',null)},maybeSingle(){return Promise.resolve(R(t,m,p))},single(){return Promise.resolve(R(t,m,p))},then(a,b){return Promise.resolve(R(t,m,p)).then(a,b)}};return o}return{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}}),getUser:async()=>({data:{user:{id:'u'}}}),signOut:async()=>({})},from:t=>q(t),storage:{from:()=>({getPublicUrl:path=>({data:{publicUrl:'https://media.test/'+path}}),upload:async(path,file)=>({data:{path},error:null}),remove:async()=>({data:[],error:null})})},channel:()=>({on(){return this},subscribe(cb){setTimeout(()=>cb('SUBSCRIBED'),1);return this}})}}};` }));
+          await page.route('https://media.test/**',async r=>r.fulfill({status:200,contentType:r.request().url().endsWith('.mp4')?'video/mp4':'image/jpeg',body:''}));
+          await page.goto('http://127.0.0.1:8765/live-v5/index.html');await page.waitForSelector('#operator:not(.hide)',{timeout:10000});
+          const click=async s=>{await page.locator(s).first().click();await wait(80)},pass=async(n,f)=>{await f();console.log('PASS',n)};
+          await pass('media library loads',async()=>{await click('[data-tab="media"]');await page.waitForSelector('.mediaAsset');if(await page.locator('.mediaAsset').count()!==2)throw Error('media count')});
+          await pass('folders and favorites',async()=>{if(await page.locator('.mediaLibraryFolder').count()<4)throw Error('folders');await click('.mediaFav');await wait(80)});
+          await pass('image preview',async()=>{await page.locator('.mediaAsset').filter({hasText:'Fundo culto.jpg'}).locator('.pvMedia').click();await wait(80);const st=await page.locator('#preview .bg').getAttribute('style');if(!(st||'').includes('media.test'))throw Error('image preview')});
+          await pass('video live',async()=>{await page.locator('.mediaAsset').filter({hasText:'Motion louvor.mp4'}).locator('.liveMedia').click();await wait(120);const v=page.locator('#preview .screenVideo');if(await v.getAttribute('src')!=='https://media.test/Louvor/motion.mp4')throw Error('video source');if(await v.evaluate(e=>e.classList.contains('hide')))throw Error('video hidden')});
+          await pass('upload image',async()=>{await page.setInputFiles('#mediaFiles',{name:'nova-arte.png',mimeType:'image/png',buffer:Buffer.from([137,80,78,71,13,10,26,10])});await page.fill('#mediaFolderName','Avisos');await click('#uploadMedia');await page.waitForFunction(()=>document.querySelector('#mediaUploadStatus')?.textContent.includes('1 arquivo'),null,{timeout:5000});if(await page.locator('.mediaAsset').count()<3)throw Error('upload card')});
+          await pass('core controls preserved',async()=>{await click('[data-tab="content"]');await page.fill('#ctTitle','Teste');await click('#prepare');await click('#take');await click('#black');await click('#undo')});
+          if(errs.length)throw Error('page errors: '+errs.join(' | '));console.log('ALL_V55_MEDIA_TESTS_PASSED');await browser.close();server.kill();
+          JS
+          node test-v55.mjs
