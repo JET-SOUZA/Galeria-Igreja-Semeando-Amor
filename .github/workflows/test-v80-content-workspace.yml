@@ -1,0 +1,22 @@
+name: Test Semeando Live V8 Content Workspace
+on:
+  push:
+    paths: ['.github/workflows/test-v80-content-workspace.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v80-content-workspace.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v80-content-workspace.js?v=8001' live-v5/v59-setlist.js
+          grep -q 'V8 · CONTENT & MEDIA WORKSPACE' live-v5/v59-setlist.js
+          grep -q 'Browser · Decks · Layers · Preview · AO AR' live-v5/v80-content-workspace.js
+          grep -q 'BANCO ONLINE DE MÍDIA' live-v5/v80-content-workspace.js
+          grep -q 'BÍBLIA NATIVA' live-v5/v80-content-workspace.js
+          grep -q 'sl_media' live-v5/v80-content-workspace.js
+          grep -q 'sl_songs' live-v5/v80-content-workspace.js
+          echo 'ALL_V80_CONTENT_WORKSPACE_TESTS_PASSED'
