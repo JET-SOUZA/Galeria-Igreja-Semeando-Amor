@@ -1,0 +1,88 @@
+name: Test Semeando Live V5.3 Buttons
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/test-v53-buttons.yml'
+
+jobs:
+  browser-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm i playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Run browser button tests
+        run: |
+          cat > /tmp/test.mjs <<'JS'
+          import { chromium } from 'playwright';
+          import { spawn } from 'node:child_process';
+          const server=spawn('python3',['-m','http.server','8765'],{stdio:'ignore'});
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          await sleep(900);
+          const browser=await chromium.launch({headless:true});
+          const page=await browser.newPage({viewport:{width:1280,height:900}});
+          const errors=[];
+          page.on('pageerror',e=>errors.push('PAGE: '+e.message));
+          page.on('console',m=>{if(m.type()==='error') errors.push('CONSOLE: '+m.text())});
+          await page.route('https://cdn.jsdelivr.net/**', async route=>{
+            const stub=`window.supabase={createClient(){
+              const sampleSong={id:'song1',title:'Louvor Teste',artist:'Equipe',key_signature:'G'};
+              const sampleSlides=[{id:'a',song_id:'song1',label:'Verso 1',body:'Primeira linha\\nSegunda linha',sort_order:0},{id:'b',song_id:'song1',label:'Refrão',body:'Refrão teste\\nOutra linha',sort_order:1}];
+              const service={id:'svc1',title:'Culto de Teste',status:'live'};
+              const profile={full_name:'Operador Teste',role:'admin',is_active:true};
+              const live={revision:1,state:{type:'welcome',title:'BEM-VINDOS',body:'Teste',background:0,kicker:'WELCOME',blackout:false}};
+              const result=(table,mode,payload)=>{
+                if(table==='sl_profiles') return {data:profile,error:null};
+                if(table==='sl_services') return {data:[service],error:null};
+                if(table==='sl_service_items') return {data:[],error:null};
+                if(table==='sl_songs') return {data:[sampleSong],error:null};
+                if(table==='sl_song_slides') return {data:sampleSlides,error:null};
+                if(table==='sl_live_state') return {data: mode==='update'?{revision:2,state:payload||live.state}:live,error:null};
+                if(table==='sl_scripture_cache') return {data:[],error:null};
+                return {data:[],error:null};
+              };
+              function q(table,mode='select',payload=null){
+                const o={_table:table,_mode:mode,_payload:payload,
+                  select(){return o},eq(){return o},in(){return o},order(){return Promise.resolve(result(table,mode,payload))},limit(){return Promise.resolve(result(table,mode,payload))},
+                  maybeSingle(){return Promise.resolve(result(table,mode,payload))},single(){return Promise.resolve(result(table,mode,payload))},
+                  insert(v){return q(table,'insert',v)},update(v){return q(table,'update',v)},upsert(v){return q(table,'upsert',v)},
+                  then(res,rej){return Promise.resolve(result(table,mode,payload)).then(res,rej)}
+                };return o;
+              }
+              return {auth:{getSession:async()=>({data:{session:{user:{id:'u1'}}}}),getUser:async()=>({data:{user:{id:'u1'}}}),signOut:async()=>({})},
+                from:t=>q(t),channel:()=>({on(){return this},subscribe(cb){setTimeout(()=>cb('SUBSCRIBED'),5);return this}})};
+            }};`;
+            await route.fulfill({status:200,contentType:'application/javascript',body:stub});
+          });
+          await page.goto('http://127.0.0.1:8765/live-v5/index.html',{waitUntil:'domcontentloaded'});
+          await page.waitForSelector('#operator:not(.hide)',{timeout:10000});
+          const click=async sel=>{await page.locator(sel).first().click();await sleep(80)};
+          const ok=async(name,fn)=>{try{await fn();console.log('PASS',name)}catch(e){console.log('FAIL',name,e.message);throw e}};
+          await ok('Conteúdo / preparar preview',async()=>{await page.fill('#ctTitle','Teste Preview');await page.fill('#ctBody','Corpo');await click('#prepare');if(!((await page.textContent('#preview h2'))||'').includes('Teste Preview'))throw Error('preview não atualizou')});
+          await ok('IR AO AR',async()=>{await click('#take')});
+          await ok('Anterior / Próximo',async()=>{await click('#next');await click('#prev')});
+          await ok('Limpar / Blackout / Desfazer',async()=>{await click('#clear');await click('#black');await click('#undo')});
+          await ok('Música Prévia',async()=>{await click('[data-tab="songs"]');await page.waitForSelector('.song .pv');await click('.song .pv');await page.waitForSelector('#songNow:not(.hide)');if(await page.locator('.slide').count()<2)throw Error('slides não abriram')});
+          await ok('Música PREVIEW / AO AR',async()=>{await click('.previewSlide');await click('.goSlide')});
+          await ok('Bíblia Preview manual',async()=>{await click('[data-tab="bible"]');await page.fill('#verseRef','João 3:16');await page.fill('#verseText','Texto de teste');await click('#previewBible');if(!((await page.textContent('#preview h2'))||'').includes('João 3:16'))throw Error('Bíblia não entrou no preview')});
+          await ok('Produção Lower Third',async()=>{await click('[data-tab="production"]');await page.fill('#lowerTitle','Pr. Teste');await page.fill('#lowerSub','Mensagem');await click('#previewLower');await click('#liveLower');await click('#clearLower')});
+          await ok('Produção Mensagem rápida',async()=>{await page.fill('#quickTitle','ATENÇÃO');await page.fill('#quickBody','Mensagem de teste');await click('#previewQuick');await click('#liveQuick')});
+          await ok('Timer Stage',async()=>{await page.fill('#timerMinutes','1');await click('#startTimer');await click('#resetTimer')});
+          await ok('Mídia fundos',async()=>{await click('[data-tab="media"]');await page.waitForSelector('.bgPreset');await click('.bgPreset');await page.fill('#mediaImageUrl','https://example.com/test.jpg');await click('#previewImageBg');await click('#clearImageBg')});
+          await ok('Countdown',async()=>{await page.fill('#countdownMinutes','1');await click('#startCountdownPreview');if(!((await page.textContent('#countdownRead'))||'').includes(':'))throw Error('countdown não iniciou');await click('#stopCountdown')});
+          await ok('Avisos pré-culto',async()=>{await page.fill('#noticeTitle','AVISO');await page.fill('#noticeBody','Aviso teste');await click('#noticePreview');await click('#noticeLive')});
+          await ok('Cenas rápidas',async()=>{await page.waitForSelector('.quickScene');await click('.quickScene')});
+          await ok('Modo Culto',async()=>{await click('#cult');if(!(await page.locator('body').getAttribute('class')||'').includes('cult'))throw Error('modo culto não ativou');await click('#cult')});
+          if(errors.length){console.log(errors.join('\n'));throw Error('erros de navegador detectados')}
+          console.log('ALL_BUTTON_TESTS_PASSED');
+          await browser.close(); server.kill();
+          JS
+          node /tmp/test.mjs
