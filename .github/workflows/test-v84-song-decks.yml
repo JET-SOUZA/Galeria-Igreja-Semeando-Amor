@@ -1,0 +1,20 @@
+name: Test Semeando Live V8.4 Song Decks
+on:
+  push:
+    paths: ['.github/workflows/test-v84-song-decks.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v84-song-decks.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v84-song-decks.js?v=8401' live-v5/v59-setlist.js
+          grep -q 'PARTES DA MÚSICA' live-v5/v84-song-decks.js
+          grep -q "sl_song_slides" live-v5/v84-song-decks.js
+          grep -q 'LOUVORES · LISTA' live-v5/v84-song-decks.js
+          grep -q 'v84decks' live-v5/v84-song-decks.js
+          echo ALL_V84_SONG_DECK_TESTS_PASSED
