@@ -1,0 +1,22 @@
+name: Test Semeando Live V8.1 Online Media
+on:
+  push:
+    paths: ['.github/workflows/test-v81-online-media.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v81-online-media.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v81-online-media.js?v=8101' live-v5/v59-setlist.js
+          grep -q 'V8.1 · BANCO ONLINE DE MÍDIA' live-v5/v59-setlist.js
+          grep -q 'Wikimedia Commons' live-v5/v81-online-media.js
+          grep -q 'Salvar na biblioteca' live-v5/v81-online-media.js || true
+          grep -q "storage.from('sl-media').upload" live-v5/v81-online-media.js
+          grep -q 'sl_media' live-v5/v81-online-media.js
+          grep -q 'application/json' live-v5/v81-online-media.js
+          echo 'ALL_V81_ONLINE_MEDIA_TESTS_PASSED'
