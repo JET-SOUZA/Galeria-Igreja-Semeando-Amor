@@ -1,0 +1,41 @@
+name: Deploy Semeando Live V5
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/deploy-semeando-live-v5.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: semeando-live-v5-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Prepare V5
+        run: |
+          mkdir -p site/live-v5
+          curl -fsSL 'https://mdhlhriakqqsocopravb.supabase.co/functions/v1/semeando-live-v5' -o site/live-v5/index.html
+          grep -q 'Semeando Live V5' site/live-v5/index.html
+          grep -q 'id="operator"' site/live-v5/index.html
+          grep -q 'sl_live_state' site/live-v5/index.html
+          touch site/.nojekyll
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
