@@ -1,0 +1,35 @@
+name: Publish Semeando Live V5 to site
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/publish-live-v5-to-main.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Fetch and validate V5
+        run: |
+          mkdir -p live-v5
+          curl -fsSL 'https://mdhlhriakqqsocopravb.supabase.co/functions/v1/semeando-live-v5' -o live-v5/index.html
+          grep -q 'Semeando Live V5' live-v5/index.html
+          grep -q 'id="operator"' live-v5/index.html
+          grep -q 'sl_live_state' live-v5/index.html
+      - name: Commit V5 into published site
+        run: |
+          git config user.name 'Semeando Live Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add live-v5/index.html
+          if git diff --cached --quiet; then
+            echo 'V5 already up to date'
+          else
+            git commit -m 'Publish Semeando Live V5 web app'
+            git push
+          fi
