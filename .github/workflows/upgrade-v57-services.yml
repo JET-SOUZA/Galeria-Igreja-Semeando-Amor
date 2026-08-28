@@ -1,0 +1,55 @@
+name: Upgrade Semeando Live V5.7 Services
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/upgrade-v57-services.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch V5.7
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('live-v5/index.html')
+          s=p.read_text()
+          s=s.replace('V5.6 · ROTEIRO PROFISSIONAL','V5.7 · CULTOS E MODELOS')
+          s=s.replace('V5.4 · LIVE CONTROL','V5.7 · CULTOS E MODELOS')
+          start=s.index('async function getService(){')
+          end=s.index('async function loadItems(){',start)
+          new="""async function getService(){const selected=localStorage.getItem('sl_selected_service_id');if(selected){const{data}=await sb.from('sl_services').select('*').eq('id',selected).maybeSingle();if(data)return data;localStorage.removeItem('sl_selected_service_id')}let{data}=await sb.from('sl_services').select('*').in('status',['live','ready','draft']).order('service_date',{ascending:false,nullsFirst:false}).limit(1);if(data?.[0]){localStorage.setItem('sl_selected_service_id',data[0].id);return data[0]}const{data:{user}}=await sb.auth.getUser(),r=await sb.from('sl_services').insert({title:'Culto ao Vivo',status:'ready',created_by:user.id}).select().single();if(r.data)localStorage.setItem('sl_selected_service_id',r.data.id);return r.data}"""
+          s=s[:start]+new+s[end:]
+          script='<script src="./v57-services.js"></script>'
+          if script not in s:s=s.replace('</body>',script+'</body>',1)
+          p.write_text(s)
+          PY
+      - name: Validate V5.7
+        run: |
+          grep -q 'sl_selected_service_id' live-v5/index.html
+          grep -q 'v57-services.js' live-v5/index.html
+          grep -q 'CULTOS E MODELOS' live-v5/index.html
+          test -f live-v5/v57-services.js
+          node --check live-v5/v57-services.js
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('live-v5/index.html').read_text()
+          scripts=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',s,re.S)
+          inline=[x for x in scripts if x.strip()]
+          Path('/tmp/v57-core.js').write_text(inline[-1])
+          PY
+          node --check /tmp/v57-core.js
+      - name: Commit V5.7
+        run: |
+          git config user.name 'Legacy desenvolvedor'
+          git config user.email '103953894+JET-SOUZA@users.noreply.github.com'
+          git add live-v5/index.html
+          git commit -m 'Upgrade Semeando Live to V5.7 cultos e modelos'
+          git push
