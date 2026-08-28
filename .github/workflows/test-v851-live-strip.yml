@@ -1,0 +1,20 @@
+name: Test Semeando Live V8.5.1 Live Strip
+on:
+  push:
+    paths: ['.github/workflows/test-v851-live-strip.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v851-live-song-strip.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v851-live-song-strip.js?v=8511' live-v5/v59-setlist.js
+          grep -q 'PARTES DA MÚSICA AO VIVO' live-v5/v851-live-song-strip.js
+          grep -q 'sl_song_slides' live-v5/v851-live-song-strip.js
+          grep -q 'scrollIntoView' live-v5/v851-live-song-strip.js
+          grep -q 'postgres_changes' live-v5/v851-live-song-strip.js
+          echo ALL_V851_LIVE_STRIP_TESTS_PASSED
