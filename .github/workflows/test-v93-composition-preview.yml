@@ -16,6 +16,6 @@ jobs:
           grep -q 'V9.3 · COMPOSITION PREVIEW' live-v5/v59-setlist.js
           grep -q 'v93lyrics' live-v5/v93-composition-preview.js
           grep -q 'v93overlay' live-v5/v93-composition-preview.js
-          grep -q 'COMPOSITION' live-v5/v93-composition-preview.js
+          grep -q 'COLUMN vazia' live-v5/v93-composition-preview.js
           echo ALL_V93_COMPOSITION_PREVIEW_TESTS_PASSED
-# rerun after syntax fix
+# rerun 3
