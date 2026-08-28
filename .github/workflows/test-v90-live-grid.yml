@@ -1,0 +1,22 @@
+name: Test Semeando Live V9 Live Visual Grid
+on:
+  push:
+    paths: ['.github/workflows/test-v90-live-grid.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v90-live-visual-grid.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v90-live-visual-grid.js?v=9001' live-v5/v59-setlist.js
+          grep -q 'V9 · LIVE VISUAL GRID' live-v5/v90-live-visual-grid.js
+          grep -q 'COMPOSITION MONITOR' live-v5/v90-live-visual-grid.js
+          grep -q 'PREVIEW MONITOR' live-v5/v90-live-visual-grid.js
+          grep -q 'COLUMN' live-v5/v90-live-visual-grid.js
+          grep -q 'LAYERS' live-v5/v90-live-visual-grid.js
+          grep -q 'sl_song_slides' live-v5/v90-live-visual-grid.js
+          echo ALL_V90_LIVE_GRID_TESTS_PASSED
