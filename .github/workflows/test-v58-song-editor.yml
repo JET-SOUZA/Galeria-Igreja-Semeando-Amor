@@ -31,6 +31,7 @@ jobs:
           await page.route('https://cdn.jsdelivr.net/**',r=>r.fulfill({status:200,contentType:'application/javascript',body:mock}));
           await page.goto('http://127.0.0.1:8765/live-v5/index.html');
           await page.waitForSelector('#operator:not(.hide)',{timeout:12000});
+          await page.waitForSelector('#servicesBtn',{timeout:5000});
           const pass=async(n,f)=>{await f();console.log('PASS',n)};
           await pass('V5.8 and V5.7 UI coexist',async()=>{if(await page.locator('#servicesBtn').count()!==1)throw Error('services missing');if((await page.locator('body').textContent()).includes('V5.7 · CULTOS E MODELOS'))throw Error('old version label')});
           await pass('open song with core hook',async()=>{await page.locator('[data-tab="songs"]').click();await page.waitForSelector('#songList .song .pv');await page.locator('#songList .song .pv').first().click();await page.waitForSelector('#songNow:not(.hide)');if(await page.locator('#editSongV58').count()!==1)throw Error('editor button');if(await page.locator('#slides .slide').count()!==5)throw Error('initial slides')});
