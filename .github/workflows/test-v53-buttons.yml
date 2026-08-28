@@ -21,7 +21,7 @@ jobs:
           npx playwright install --with-deps chromium >/dev/null
       - name: Run browser button tests
         run: |
-          cat > /tmp/test.mjs <<'JS'
+          cat > test-v53.mjs <<'JS'
           import { chromium } from 'playwright';
           import { spawn } from 'node:child_process';
           const server=spawn('python3',['-m','http.server','8765'],{stdio:'ignore'});
@@ -85,4 +85,4 @@ jobs:
           console.log('ALL_BUTTON_TESTS_PASSED');
           await browser.close(); server.kill();
           JS
-          node /tmp/test.mjs
+          node test-v53.mjs
