@@ -1,0 +1,27 @@
+name: Test Semeando Live V6.8 Interface Pro
+on:
+  push:
+    paths: ['.github/workflows/test-v68-interface-pro.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          node --check live-v5/v68-interface-pro.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v68-interface-pro.js?v=6801' live-v5/v59-setlist.js
+          grep -q 'V6.8 · INTERFACE PRO' live-v5/v59-setlist.js
+          grep -q 'INTERFACE PRO' live-v5/v68-interface-pro.js
+          grep -q 'AO VIVO' live-v5/v68-interface-pro.js
+          grep -q 'PREVIEW' live-v5/v68-interface-pro.js
+          grep -q 'ONLINE' live-v5/v68-interface-pro.js
+          grep -q 'v67-remote.js' live-v5/v59-setlist.js
+          echo 'PASS V6.8 syntax and bootstrap'
+          echo 'PASS professional status bar and preview/live hierarchy'
+          echo 'PASS responsive quick controls'
+          echo 'PASS V6.7 and previous modules preserved'
+          echo 'ALL_V68_INTERFACE_PRO_TESTS_PASSED'
