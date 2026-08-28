@@ -1,0 +1,28 @@
+name: Test Semeando Live V6.3 Automation
+on:
+  push:
+    paths: ['.github/workflows/test-v63-automation.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v63-automation.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v63-automation.js?v=6301' live-v5/v59-setlist.js
+          grep -q 'AUTOMAÇÃO DE CULTO' live-v5/v63-automation.js
+          grep -q 'Iniciar culto' live-v5/v63-automation.js
+          grep -q 'Entrar no louvor' live-v5/v63-automation.js
+          grep -q 'Entrar na Palavra' live-v5/v63-automation.js
+          grep -q 'Concluir + próximo' live-v5/v63-automation.js
+          grep -q 'v62-stage.js' live-v5/v59-setlist.js
+          grep -q 'v61-worship.js' live-v5/v59-setlist.js
+          grep -q 'v60-liveflow.js' live-v5/v59-setlist.js
+          echo 'PASS V6.3 module syntax'
+          echo 'PASS combined service actions'
+          echo 'PASS stage integration'
+          echo 'PASS previous modules preserved'
+          echo 'ALL_V63_AUTOMATION_TESTS_PASSED'
