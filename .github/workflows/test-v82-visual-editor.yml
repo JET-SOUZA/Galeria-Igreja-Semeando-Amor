@@ -1,0 +1,23 @@
+name: Test Semeando Live V8.2 Visual Editor
+on:
+  push:
+    paths: ['.github/workflows/test-v82-visual-editor.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v82-visual-editor.js
+          node --check live-v5/v80-content-workspace.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v82-visual-editor.js?v=8201' live-v5/v59-setlist.js
+          grep -q 'V8.2 · EDITOR VISUAL' live-v5/v59-setlist.js
+          grep -q 'getSelected' live-v5/v80-content-workspace.js
+          grep -q 'BRILHO' live-v5/v82-visual-editor.js
+          grep -q 'DESFOQUE' live-v5/v82-visual-editor.js
+          grep -q 'VELOCIDADE' live-v5/v82-visual-editor.js
+          grep -q 'Aplicar no fundo' live-v5/v82-visual-editor.js
+          echo ALL_V82_VISUAL_EDITOR_TESTS_PASSED
