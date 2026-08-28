@@ -1,11 +1,19 @@
 ---
 name: 'build binaries'
 
-on: push
+on:
+  push:
+    paths-ignore:
+      - 'live-v5/**'
+      - '.github/workflows/test-v*.yml'
 
 jobs:
   docker:
     runs-on: ubuntu-latest
+    env:
+      SSH_HOSTNAME: ${{ secrets.SSH_HOSTNAME }}
+      SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,11 +68,12 @@ jobs:
 
       - name: Deploy via rsync
         id: deploy
+        if: ${{ env.SSH_HOSTNAME != '' && env.SSH_USERNAME != '' && env.SSH_PRIVATE_KEY != '' }}
         uses: up9cloud/action-rsync@master
         env:
-          HOST: ${{secrets.SSH_HOSTNAME}}
-          USER: ${{secrets.SSH_USERNAME}}
-          KEY: ${{secrets.SSH_PRIVATE_KEY}}
+          HOST: ${{ env.SSH_HOSTNAME }}
+          USER: ${{ env.SSH_USERNAME }}
+          KEY: ${{ env.SSH_PRIVATE_KEY }}
           SOURCE: ./dist/
           TARGET: ${{ steps.prepare.outputs.TARGET_DIR }}
           ARGS: -avz
