@@ -1,0 +1,20 @@
+name: Test Semeando Live V9.3 Composition Preview
+on:
+  push:
+    paths: ['.github/workflows/test-v93-composition-preview.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v93-composition-preview.js
+          node --check live-v5/v59-setlist.js
+          grep -q 'v93-composition-preview.js?v=9301' live-v5/v59-setlist.js
+          grep -q 'V9.3 · COMPOSITION PREVIEW' live-v5/v59-setlist.js
+          grep -q 'v93lyrics' live-v5/v93-composition-preview.js
+          grep -q 'v93overlay' live-v5/v93-composition-preview.js
+          grep -q 'COMPOSITION' live-v5/v93-composition-preview.js
+          echo ALL_V93_COMPOSITION_PREVIEW_TESTS_PASSED
