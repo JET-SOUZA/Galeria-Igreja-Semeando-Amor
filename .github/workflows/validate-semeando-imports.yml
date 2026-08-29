@@ -23,6 +23,8 @@ jobs:
           cache-dependency-path: webapp/package.json
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Validate deploy source
+        run: npm run check:deploy
       - name: Test ZIP extraction
         run: node scripts/test-zip-import.mjs
       - name: Build Next.js
