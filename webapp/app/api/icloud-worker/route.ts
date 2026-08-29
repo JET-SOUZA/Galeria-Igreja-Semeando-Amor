@@ -17,6 +17,9 @@ const hash=(s:string)=>createHash('sha256').update(s).digest('hex').slice(0,32);
 const idFor=(url:string)=>hash(new URL(url).pathname);
 const quality=(c:Candidate)=>Math.max(c.size||0,(c.width||0)*(c.height||0));
 const imageUrl=(s:string)=>/^https?:\/\/[^\s]+icloud-content\.com\//i.test(s);
+const extForMime=(mime:string)=>({
+ 'image/jpeg':'jpg','image/jpg':'jpg','image/png':'png','image/webp':'webp','image/heic':'heic','image/heif':'heif','image/avif':'avif'
+} as Record<string,string>)[String(mime||'').toLowerCase()]||'jpg';
 function normalize(link:string){const m=link.match(/(?:share\.)?icloud\.com\/photos\/([A-Za-z0-9_-]+)/i)||link.match(/icloud\.com\/photos\/#\/?icloudlinks\/([A-Za-z0-9_-]+)/i)||link.match(/icloud\.com\/photos\/#([A-Za-z0-9_-]+)/i);if(!m)throw new Error('Link share.icloud.com/photos inválido.');return `https://www.icloud.com/photos/#${m[1]}`}
 async function media(body:any){const r=await fetch(MEDIA_IMPORT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error||`media-import respondeu ${r.status}`);return d}
 
@@ -90,7 +93,7 @@ export async function POST(req:NextRequest){
   else{for(const c of Array.from(networkCandidates.values()).sort((a,b)=>quality(b)-quality(a))){const id=idFor(c.url),prev=chosen.get(id);if(!prev||quality(c)>quality(prev))chosen.set(id,c)}}
   if(!chosen.size)throw new Error('O iCloud abriu, mas nenhuma imagem do compartilhamento foi descoberta. O link pode ter expirado ou a Apple pode ter alterado o visualizador.');
 
-  const items=Array.from(chosen.entries()).sort((a,b)=>quality(b[1])-quality(a[1])).slice(0,2000).map(([id,c],i)=>({id:hash(id),source_asset_id:c.asset_id||null,name:`icloud-${String(i+1).padStart(4,'0')}.jpg`,url:c.url,size:c.size||null,mime_type:c.mime_type,method:c.method,width:c.width||null,height:c.height||null}));
+  const items=Array.from(chosen.entries()).sort((a,b)=>quality(b[1])-quality(a[1])).slice(0,2000).map(([id,c],i)=>({id:hash(id),name:`icloud-${String(i+1).padStart(4,'0')}.${extForMime(c.mime_type)}`,url:c.url,size:c.size||null,mime_type:c.mime_type,method:c.method,width:c.width||null,height:c.height||null}));
   await media({action:'worker_register',job_id:jobId,worker_token:workerToken,items,discovery:{cloudkit_assets:cloudAssets.size,network_candidates:networkCandidates.size,strategy:cloudAssets.size?'cloudkit_record':'network_fallback'}});
   const started=await media({action:'worker_ingest',job_id:jobId,worker_token:workerToken});
   return NextResponse.json({ok:true,job_id:jobId,found:items.length,cloudkit_assets:cloudAssets.size,network_candidates:networkCandidates.size,strategy:cloudAssets.size?'cloudkit_record':'network_fallback',processing:true,status:started.status});
