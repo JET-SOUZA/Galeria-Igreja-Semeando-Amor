@@ -23,9 +23,6 @@ export async function POST(req:NextRequest){
  try{
   const body=await req.json();jobId=String(body.job_id||'');workerToken=String(body.worker_token||'');
   if(!jobId||!workerToken)return NextResponse.json({error:'Credenciais do job são obrigatórias.'},{status:400});
-
-  // Validate the one-time worker token before starting Chromium. The source link is
-  // returned by the trusted backend, never accepted from an arbitrary caller.
   const validated=await media({action:'worker_validate',job_id:jobId,worker_token:workerToken});
   const target=normalize(String(validated.link||'')),candidates=new Map<string,Candidate>();
   const executablePath=await chromium.executablePath(CHROMIUM_PACK);
@@ -43,15 +40,13 @@ export async function POST(req:NextRequest){
    const current=candidates.size;if(current===last)stable++;else stable=0;last=current;
   }
 
-  // Some Apple responses omit content-length. Rendered CDN images are kept as a
-  // fallback, while network candidates with a measurable larger payload win.
   const rendered=await page.$$eval('img',els=>els.map((e:any)=>({url:e.currentSrc||e.src,width:e.naturalWidth||0,height:e.naturalHeight||0})).filter((x:any)=>x.url&&x.width>=160&&x.height>=160));
   for(const x of rendered){try{if(!/(?:cvws\.)?icloud-content\.com/i.test(x.url))continue;const key=new URL(x.url).pathname;if(!candidates.has(key))candidates.set(key,{url:x.url,size:x.width*x.height,mime_type:'image/jpeg',method:'rendered'})}catch{}}
 
   if(!candidates.size)throw new Error('O iCloud abriu, mas nenhuma imagem do compartilhamento foi descoberta. O link pode ter expirado ou a Apple pode ter alterado o visualizador.');
-  const all=[...candidates.values()].sort((a,b)=>b.size-a.size),dedup=new Map<string,Candidate>();
+  const all=Array.from(candidates.values()).sort((a,b)=>b.size-a.size),dedup=new Map<string,Candidate>();
   for(const c of all){const id=idFor(c.url);if(!dedup.has(id))dedup.set(id,c)}
-  const items=[...dedup.entries()].slice(0,2000).map(([id,c],i)=>({id,name:`icloud-${String(i+1).padStart(4,'0')}.jpg`,url:c.url,size:c.size||null,mime_type:c.mime_type,method:c.method}));
+  const items=Array.from(dedup.entries()).slice(0,2000).map(([id,c],i)=>({id,name:`icloud-${String(i+1).padStart(4,'0')}.jpg`,url:c.url,size:c.size||null,mime_type:c.mime_type,method:c.method}));
   await media({action:'worker_register',job_id:jobId,worker_token:workerToken,items});
   const started=await media({action:'worker_ingest',job_id:jobId,worker_token:workerToken});
   return NextResponse.json({ok:true,job_id:jobId,found:items.length,processing:true,status:started.status});
