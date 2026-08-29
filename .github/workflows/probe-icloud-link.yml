@@ -1,0 +1,32 @@
+name: Probe iCloud link
+
+on:
+  pull_request:
+    types: [edited]
+    branches: [main]
+
+jobs:
+  probe:
+    if: github.event.pull_request.head.ref == 'fix/zip-icloud-import-20260829' && contains(github.event.pull_request.body, 'ICLOUD_TEST_LINK=')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/zip-icloud-import-20260829
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Read masked link from PR body
+        shell: bash
+        run: |
+          LINK=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH" | sed -n 's/^ICLOUD_TEST_LINK=//p' | head -n1)
+          test -n "$LINK"
+          echo "::add-mask::$LINK"
+          echo "ICLOUD_TEST_LINK=$LINK" >> "$GITHUB_ENV"
+      - name: Probe iCloud with headless Chrome
+        run: node scripts/probe-icloud-link.mjs
