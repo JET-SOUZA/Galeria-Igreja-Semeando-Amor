@@ -86,7 +86,7 @@ export async function POST(req:NextRequest){
   for(const x of rendered){try{if(!/(?:cvws\.)?icloud-content\.com/i.test(x.url))continue;const key=new URL(x.url).pathname;const next={url:x.url,size:0,mime_type:'image/jpeg',method:'rendered',width:x.width,height:x.height};const prev=networkCandidates.get(key);if(!prev||quality(next)>quality(prev))networkCandidates.set(key,next)}catch{}}
 
   const chosen=new Map<string,Candidate>();
-  if(cloudAssets.size){for(const [assetId,c] of cloudAssets)chosen.set(`ck:${assetId}`,c)}
+  if(cloudAssets.size){for(const [assetId,c] of Array.from(cloudAssets.entries()))chosen.set(`ck:${assetId}`,c)}
   else{for(const c of Array.from(networkCandidates.values()).sort((a,b)=>quality(b)-quality(a))){const id=idFor(c.url),prev=chosen.get(id);if(!prev||quality(c)>quality(prev))chosen.set(id,c)}}
   if(!chosen.size)throw new Error('O iCloud abriu, mas nenhuma imagem do compartilhamento foi descoberta. O link pode ter expirado ou a Apple pode ter alterado o visualizador.');
 
