@@ -6,10 +6,12 @@
     "build": "next build"
   },
   "dependencies": {
+    "@sparticuz/chromium-min": "133.0.0",
+    "jszip": "3.10.1",
     "next": "14.2.35",
+    "puppeteer-core": "24.8.2",
     "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "jszip": "3.10.1"
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
     "typescript": "5.9.2",
