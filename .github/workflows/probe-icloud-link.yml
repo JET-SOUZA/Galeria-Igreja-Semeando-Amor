@@ -2,6 +2,11 @@ name: Probe iCloud link
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix/zip-icloud-import-20260829
+    paths:
+      - '.github/workflows/probe-icloud-link.yml'
 
 jobs:
   probe:
