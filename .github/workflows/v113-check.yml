@@ -1,12 +1,6 @@
-name: V11.3 validation
+name: V11.3 validation (manual)
 on:
-  push:
-    paths:
-      - 'live-v5/v113-media-playback.js'
-      - 'live-v5/v101-song-parts-control.js'
-      - 'live-v5/arena.html'
-      - 'live-v5/v59-setlist.js'
-      - '.github/workflows/v113-check.yml'
+  workflow_dispatch:
 jobs:
   validate:
     runs-on: ubuntu-latest
