@@ -1,0 +1,28 @@
+name: V11.6 validation
+on:
+  push:
+    paths:
+      - 'live-v5/v116-mapping-pro.js'
+      - 'live-v5/arena.html'
+      - 'live-v5/v59-setlist.js'
+      - '.github/workflows/v116-check.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Syntax
+        run: |
+          node --check live-v5/v116-mapping-pro.js
+          node --check live-v5/v115-mapping-slices.js
+          node --check live-v5/v59-setlist.js
+      - name: Integration
+        run: |
+          grep -q 'SemeandoV116' live-v5/v116-mapping-pro.js
+          grep -q 'v116-mapping-pro.js' live-v5/arena.html
+          grep -q 'v116-mapping-pro.js' live-v5/v59-setlist.js
+          grep -q 'PRESETS DE OUTPUT' live-v5/v116-mapping-pro.js
+          grep -q 'ROTEAMENTO DE SAÍDA' live-v5/v116-mapping-pro.js
+          grep -q 'BARRAS DE COR' live-v5/v116-mapping-pro.js
