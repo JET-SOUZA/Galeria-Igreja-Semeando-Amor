@@ -15,7 +15,16 @@ export default function Login(){
   if(info?.error)throw new Error(info.error);
   return false
  }
- useEffect(()=>{const s=readSession();if(s?.access_token)routeByRole(s.access_token).then(ok=>{if(!ok){localStorage.removeItem('semeando_admin_session');sessionStorage.removeItem('semeando_admin_session')}}).catch(err=>{setError(err.message||'Acesso indisponível.');localStorage.removeItem('semeando_admin_session');sessionStorage.removeItem('semeando_admin_session')})},[]);
+ useEffect(()=>{
+  const qs=new URLSearchParams(location.search),message=qs.get('message'),reason=qs.get('reason');
+  if(message)setError(message);
+  else if(reason==='trial_expired')setError('O período de teste desta organização terminou.');
+  else if(reason==='payment_overdue')setError('O pagamento está em atraso e o período de tolerância terminou.');
+  else if(reason==='suspended')setError('Esta organização está suspensa.');
+  else if(reason==='blocked')setError('O acesso desta organização foi bloqueado pelo responsável da plataforma.');
+  else if(reason==='session')setError('Sua sessão expirou. Entre novamente.');
+  const s=readSession();if(s?.access_token)routeByRole(s.access_token).then(ok=>{if(!ok){localStorage.removeItem('semeando_admin_session');sessionStorage.removeItem('semeando_admin_session')}}).catch(err=>{setError(err.message||'Acesso indisponível.');localStorage.removeItem('semeando_admin_session');sessionStorage.removeItem('semeando_admin_session')})
+ },[]);
  async function submit(e:FormEvent){e.preventDefault();setBusy(true);setError('');try{
   const r=await fetch(`${SB}/auth/v1/token?grant_type=password`,{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
   const d=await r.json();if(!r.ok)throw new Error(d.error_description||d.msg||d.message||'E-mail ou senha inválidos.');
