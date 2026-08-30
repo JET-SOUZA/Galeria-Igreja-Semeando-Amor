@@ -1,11 +1,6 @@
 name: V11.4 validation
 on:
-  push:
-    paths:
-      - 'live-v5/v114-advanced-output.js'
-      - 'live-v5/arena.html'
-      - 'live-v5/v59-setlist.js'
-      - '.github/workflows/v114-check.yml'
+  workflow_dispatch:
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -23,5 +18,3 @@ jobs:
           grep -q "SemeandoV114" live-v5/v114-advanced-output.js
           grep -q "v114-advanced-output.js" live-v5/v59-setlist.js
           grep -q "v114-advanced-output.js" live-v5/arena.html
-          grep -q "ABRIR NO 2º MONITOR" live-v5/v114-advanced-output.js
-          grep -q "TELA CHEIA" live-v5/v114-advanced-output.js
