@@ -1,0 +1,36 @@
+name: Webapp Build
+
+on:
+  pull_request:
+    paths:
+      - 'webapp/**'
+      - '.github/workflows/webapp-build.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'webapp/**'
+      - '.github/workflows/webapp-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webapp/package.json
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build Next.js
+        run: npm run build
