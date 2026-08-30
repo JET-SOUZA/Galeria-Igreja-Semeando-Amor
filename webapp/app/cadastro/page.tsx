@@ -4,13 +4,14 @@ import {CHURCH_LOGO,LEGACY_LOGO} from '../brand';
 import {SB,KEY} from '../../lib/sb';
 
 type SolarValue=''|'yes'|'no';
+const VALID_DDDS=new Set(['11','12','13','14','15','16','17','18','19','21','22','24','27','28','31','32','33','34','35','37','38','41','42','43','44','45','46','47','48','49','51','53','54','55','61','62','63','64','65','66','67','68','69','71','73','74','75','77','79','81','82','83','84','85','86','87','88','89','91','92','93','94','95','96','97','98','99']);
 const onlyDigits=(v:string)=>v.replace(/\D/g,'');
 const formatCpf=(v:string)=>onlyDigits(v).slice(0,11).replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2');
 const formatPhone=(v:string)=>{const d=onlyDigits(v).replace(/^55(?=\d{10,11}$)/,'').slice(0,11);if(d.length<=2)return d;if(d.length<=6)return `(${d.slice(0,2)}) ${d.slice(2)}`;if(d.length<=10)return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`};
-const validEmail=(v:string)=>/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(v);
+const validEmail=(v:string)=>/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(v.trim());
 const validCpf=(raw:string)=>{const cpf=onlyDigits(raw);if(cpf.length!==11||/^(\d)\1{10}$/.test(cpf))return false;const calc=(len:number)=>{let sum=0;for(let i=0;i<len;i++)sum+=Number(cpf[i])*(len+1-i);const r=(sum*10)%11;return r===10?0:r};return calc(9)===Number(cpf[9])&&calc(10)===Number(cpf[10])};
 const validFullName=(v:string)=>{const parts=v.trim().replace(/\s+/g,' ').split(' ').filter(Boolean);return parts.length>=2&&parts.every(p=>p.length>=2&&/^[A-Za-zÀ-ÖØ-öø-ÿ'’-]+$/.test(p))};
-const validPhone=(v:string)=>{const d=onlyDigits(v).replace(/^55(?=\d{10,11}$)/,'');return d.length===10||d.length===11};
+const validPhone=(v:string)=>{const d=onlyDigits(v).replace(/^55(?=\d{10,11}$)/,'');if(!(d.length===10||d.length===11))return false;if(!VALID_DDDS.has(d.slice(0,2)))return false;const local=d.slice(2);if(/^0+$/.test(local)||/^(\d)\1+$/.test(local))return false;if(d.length===11&&local[0]!=='9')return false;return true};
 const validBirthDate=(v:string)=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;const d=new Date(v+'T00:00:00Z');if(Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==v)return false;const now=new Date();if(d>now)return false;const min=new Date();min.setUTCFullYear(min.getUTCFullYear()-120);return d>=min};
 
 export default function Cadastro(){
@@ -24,7 +25,7 @@ export default function Cadastro(){
   if(!validEmail(form.email)){setError('Informe um e-mail válido.');return}
   if(!validCpf(form.cpf)){setError('Informe um CPF válido.');return}
   if(!validBirthDate(form.birth_date)){setError('Informe uma data de nascimento válida.');return}
-  if(!validPhone(form.whatsapp)){setError('Informe um WhatsApp válido com DDD.');return}
+  if(!validPhone(form.whatsapp)){setError('Informe um WhatsApp brasileiro válido com DDD.');return}
   if(!['house','apartment','other'].includes(form.housing_type)||!form.street.trim()||!form.neighborhood.trim()||!form.city.trim()){setError('Preencha corretamente os dados de moradia e endereço.');return}
   if(!form.has_solar){setError('Informe se você possui energia solar.');return}
   if(!form.privacy){setError('Aceite a Política de Privacidade para continuar.');return}
