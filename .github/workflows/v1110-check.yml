@@ -1,0 +1,27 @@
+name: V11.10 validation
+on: {push: {paths: ['live-v5/v1110-service-decks.js','live-v5/v119-browser-pro.js','live-v5/v118-effects-engine.js','live-v5/arena.html','live-v5/v59-setlist.js','.github/workflows/v1110-check.yml']}}
+jobs:
+ validate:
+  runs-on: ubuntu-latest
+  steps:
+   - uses: actions/checkout@v4
+   - uses: actions/setup-node@v4
+     with: {node-version: '22'}
+   - run: |
+      node --check live-v5/v1110-service-decks.js
+      node --check live-v5/v119-browser-pro.js
+      node --check live-v5/v118-effects-engine.js
+      node --check live-v5/v59-setlist.js
+   - run: |
+      grep -q 'SemeandoV1110' live-v5/v1110-service-decks.js
+      grep -q 'ABERTURA' live-v5/v1110-service-decks.js
+      grep -q 'LOUVOR' live-v5/v1110-service-decks.js
+      grep -q 'PALAVRA' live-v5/v1110-service-decks.js
+      grep -q 'OFERTA' live-v5/v1110-service-decks.js
+      grep -q 'AVISOS' live-v5/v1110-service-decks.js
+      grep -q 'CEIA' live-v5/v1110-service-decks.js
+      grep -q 'ENCERRAMENTO' live-v5/v1110-service-decks.js
+      grep -q 'v1110-service-decks.js' live-v5/arena.html
+      grep -q 'v1110-service-decks.js' live-v5/v59-setlist.js
+      grep -q 'SemeandoV119' live-v5/v119-browser-pro.js
+      grep -q 'SemeandoV118' live-v5/v118-effects-engine.js
