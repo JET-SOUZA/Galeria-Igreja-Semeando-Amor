@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useMemo,useState} from 'react';
-import {KEY,SB,readSession} from '../../lib/sb';
+import {KEY,SB,readSession} from '../../../lib/sb';
 const labels:any={open:'Aberto',investigating:'Investigando',resolved:'Resolvido',ignored:'Ignorado',critical:'Crítico',warning:'Atenção',info:'Informativo'};
 export default function Incidentes(){const[data,setData]=useState<any>({summary:{},incidents:[]}),[busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[status,setStatus]=useState('open'),[severity,setSeverity]=useState(''),[search,setSearch]=useState('');
  async function token(){const s=readSession();if(!s?.access_token){location.href='/acesso';throw Error('Sessão expirada.')}return s.access_token}
