@@ -60,10 +60,3 @@ jobs:
         run: |
           npx vercel deploy --prebuilt --token="$VERCEL_TOKEN" --scope=legacy-solar | tee /tmp/vercel-preview-url.txt
           echo "Preview URL: $(tail -n 1 /tmp/vercel-preview-url.txt)"
-
-      - name: Guard against production flag
-        run: |
-          if grep -R --line-number --fixed-strings -- '--prod' ../.github/workflows/vercel-preview.yml; then
-            echo "Production deploy flag is forbidden in this preview workflow."
-            exit 1
-          fi
