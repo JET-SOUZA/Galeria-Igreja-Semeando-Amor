@@ -1,0 +1,28 @@
+name: V11.3 validation
+on:
+  push:
+    paths:
+      - 'live-v5/v113-media-playback.js'
+      - 'live-v5/v101-song-parts-control.js'
+      - 'live-v5/arena.html'
+      - 'live-v5/v59-setlist.js'
+      - '.github/workflows/v113-check.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: |
+          node --check live-v5/v113-media-playback.js
+          node --check live-v5/v101-song-parts-control.js
+          node --check live-v5/v59-setlist.js
+      - name: Integration markers
+        run: |
+          grep -q "SemeandoV113" live-v5/v113-media-playback.js
+          grep -q "v113-media-playback.js" live-v5/v59-setlist.js
+          grep -q "v113-media-playback.js" live-v5/arena.html
+          grep -q "proActive" live-v5/v101-song-parts-control.js
