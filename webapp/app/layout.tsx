@@ -1,3 +1,4 @@
 import './styles.css';
-export const metadata={title:'Semeando Memórias',description:'Galeria oficial de eventos da Igreja Semeando Amor'};
-export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="pt-BR"><body>{children}</body></html>}
+import PrivateGallerySessionBridge from './components/PrivateGallerySessionBridge';
+export const metadata={title:'Semeando Memórias',description:'Galerias de eventos públicas e privadas com acesso seguro'};
+export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="pt-BR"><body><PrivateGallerySessionBridge/>{children}</body></html>}
