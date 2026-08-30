@@ -1,0 +1,27 @@
+name: V11.4 validation
+on:
+  push:
+    paths:
+      - 'live-v5/v114-advanced-output.js'
+      - 'live-v5/arena.html'
+      - 'live-v5/v59-setlist.js'
+      - '.github/workflows/v114-check.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: |
+          node --check live-v5/v114-advanced-output.js
+          node --check live-v5/v59-setlist.js
+      - name: Integration markers
+        run: |
+          grep -q "SemeandoV114" live-v5/v114-advanced-output.js
+          grep -q "v114-advanced-output.js" live-v5/v59-setlist.js
+          grep -q "v114-advanced-output.js" live-v5/arena.html
+          grep -q "ABRIR NO 2º MONITOR" live-v5/v114-advanced-output.js
+          grep -q "TELA CHEIA" live-v5/v114-advanced-output.js
