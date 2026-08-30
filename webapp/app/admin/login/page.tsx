@@ -8,10 +8,11 @@ export default function Login(){
  async function routeByRole(accessToken:string){
   const dev=await fetch(`${SB}/functions/v1/developer-console`,{headers:{apikey:KEY,Authorization:`Bearer ${accessToken}`}});
   if(dev.ok){location.replace('/developer');return true}
-  const admin=await fetch(`${SB}/functions/v1/admin-users`,{headers:{apikey:KEY,Authorization:`Bearer ${accessToken}`}});
+  const admin=await fetch(`${SB}/functions/v1/admin-access`,{headers:{apikey:KEY,Authorization:`Bearer ${accessToken}`}});
   const info=await admin.json().catch(()=>({}));
   if(admin.ok){location.replace('/admin');return true}
   if(admin.status===402&&info?.code==='ORGANIZATION_ACCESS_BLOCKED')throw new Error(info.error||'O acesso desta organização está temporariamente indisponível.');
+  if(info?.error)throw new Error(info.error);
   return false
  }
  useEffect(()=>{const s=readSession();if(s?.access_token)routeByRole(s.access_token).then(ok=>{if(!ok){localStorage.removeItem('semeando_admin_session');sessionStorage.removeItem('semeando_admin_session')}}).catch(err=>{setError(err.message||'Acesso indisponível.');localStorage.removeItem('semeando_admin_session');sessionStorage.removeItem('semeando_admin_session')})},[]);
