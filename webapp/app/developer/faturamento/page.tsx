@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useMemo,useState} from 'react';
-import {KEY,SB,readSession} from '../../lib/sb';
+import {KEY,SB,readSession} from '../../../lib/sb';
 const money=(v:any)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 export default function BillingCenter(){const[orgs,setOrgs]=useState<any[]>([]),[orgId,setOrgId]=useState(''),[detail,setDetail]=useState<any>(null),[gateway,setGateway]=useState<any>(null),[busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[billingType,setBillingType]=useState('PIX'),[cycle,setCycle]=useState('MONTHLY'),[dueDays,setDueDays]=useState('3');const selected=useMemo(()=>orgs.find(x=>x.id===orgId),[orgs,orgId]);
  async function token(){const s=readSession();if(!s?.access_token){location.href='/acesso';throw Error('Sessão expirada.')}return s.access_token}
