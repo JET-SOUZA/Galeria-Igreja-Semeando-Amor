@@ -1,0 +1,11 @@
+'use client';
+import {useEffect,useMemo,useState} from 'react';
+import {KEY,SB,money,session} from '../../../lib/sb';
+import s from './clients.module.css';
+export default function Clients(){
+ const [data,setData]=useState<any>(null),[q,setQ]=useState(''),[loading,setLoading]=useState(true),[msg,setMsg]=useState('');
+ useEffect(()=>{(async()=>{try{const ss=await session();if(!ss?.access_token){location.href='/admin/login';return}const r=await fetch(`${SB}/functions/v1/developer-console`,{headers:{apikey:KEY,Authorization:`Bearer ${ss.access_token}`}});const d=await r.json();if(!r.ok)throw new Error(d.error||'Falha ao carregar clientes.');setData(d)}catch(e:any){setMsg(e.message)}finally{setLoading(false)}})()},[]);
+ const orgs=useMemo(()=>{const a=data?.organizations||[],n=q.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();return a.filter((o:any)=>!n||[o.name,o.email,o.phone,o.slug].join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().includes(n))},[data,q]);
+ if(loading)return <main className={s.loading}>Carregando clientes...</main>;
+ return <main className={s.page}><header><div><a href="/developer">← Developer Workspace</a><span>CARTEIRA DE CLIENTES</span><h1>Clientes</h1><p>Abra a ficha 360º para controlar assinatura, acesso e financeiro.</p></div><b>{orgs.length} clientes</b></header>{msg&&<div className={s.notice}>{msg}</div>}<input className={s.search} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar empresa, e-mail, telefone ou slug..."/><section className={s.list}>{orgs.map((o:any)=>{const p=(data?.plans||[]).find((x:any)=>x.id===o.plan_id),a=o.access_state||{},sub=o.subscription||{};return <a key={o.id} href={`/developer/clientes/${o.id}`}><div className={s.avatar}>{o.name?.charAt(0)?.toUpperCase()||'C'}</div><div className={s.main}><b>{o.name}</b><small>{o.email||'Sem e-mail'} • {o.phone||'Sem telefone'}</small><div><span>{p?.name||'Sem plano'}</span><span>{p?`${money(p.monthly_price)}/mês`:'Assinatura pendente'}</span></div></div><div className={s.state}><i className={a.allowed?s.ok:s.bad}>{a.allowed?'ATIVO':'BLOQUEADO'}</i><small>{sub.next_billing_at?`Próxima: ${new Date(sub.next_billing_at).toLocaleDateString('pt-BR')}`:'Sem cobrança agendada'}</small></div><em>→</em></a>})}{!orgs.length&&<div className={s.empty}>Nenhum cliente encontrado.</div>}</section></main>;
+}
