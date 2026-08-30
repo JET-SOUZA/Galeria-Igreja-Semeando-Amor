@@ -1,5 +1,5 @@
 'use client';
-import {FormEvent,useEffect,useMemo,useState} from 'react';
+import {FormEvent,useEffect,useMemo,useRef,useState} from 'react';
 import {CHURCH_LOGO,LEGACY_LOGO} from '../brand';
 import {SB,KEY} from '../../lib/sb';
 
@@ -8,6 +8,9 @@ const VALID_DDDS=new Set(['11','12','13','14','15','16','17','18','19','21','22'
 const onlyDigits=(v:string)=>v.replace(/\D/g,'');
 const formatCpf=(v:string)=>onlyDigits(v).slice(0,11).replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2');
 const formatPhone=(v:string)=>{const d=onlyDigits(v).replace(/^55(?=\d{10,11}$)/,'').slice(0,11);if(d.length<=2)return d;if(d.length<=6)return `(${d.slice(0,2)}) ${d.slice(2)}`;if(d.length<=10)return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`};
+const formatBirthText=(v:string)=>{const d=onlyDigits(v).slice(0,8);if(d.length<=2)return d;if(d.length<=4)return `${d.slice(0,2)}/${d.slice(2)}`;return `${d.slice(0,2)}/${d.slice(2,4)}/${d.slice(4)}`};
+const textToIso=(v:string)=>{const m=v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);if(!m)return '';return `${m[3]}-${m[2]}-${m[1]}`};
+const isoToText=(v:string)=>{const m=v.match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:''};
 const validEmail=(v:string)=>/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(v.trim());
 const validCpf=(raw:string)=>{const cpf=onlyDigits(raw);if(cpf.length!==11||/^(\d)\1{10}$/.test(cpf))return false;const calc=(len:number)=>{let sum=0;for(let i=0;i<len;i++)sum+=Number(cpf[i])*(len+1-i);const r=(sum*10)%11;return r===10?0:r};return calc(9)===Number(cpf[9])&&calc(10)===Number(cpf[10])};
 const validFullName=(v:string)=>{const parts=v.trim().replace(/\s+/g,' ').split(' ').filter(Boolean);return parts.length>=2&&parts.every(p=>p.length>=2&&/^[A-Za-zÀ-ÖØ-öø-ÿ'’-]+$/.test(p))};
@@ -16,13 +19,17 @@ const validBirthDate=(v:string)=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false
 
 export default function Cadastro(){
  const [form,setForm]=useState({full_name:'',email:'',cpf:'',birth_date:'',housing_type:'house',street:'',neighborhood:'',city:'Campos dos Goytacazes',whatsapp:'',has_solar:'' as SolarValue,privacy:false,marketing_consent:false});
+ const [birthText,setBirthText]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+ const dateRef=useRef<HTMLInputElement>(null);
  const next=typeof window!=='undefined'?new URLSearchParams(location.search).get('next')||'/':'';
  const maxBirth=useMemo(()=>new Date().toISOString().slice(0,10),[]);
  useEffect(()=>{try{const v=JSON.parse(localStorage.getItem('semeando_visitor')||'null');if(v?.id){const n=next.startsWith('/')?next:'/';location.replace(n)}}catch{}},[]);
+ function changeBirthText(v:string){const formatted=formatBirthText(v);setBirthText(formatted);const iso=textToIso(formatted);setForm(f=>({...f,birth_date:iso}))}
+ function openCalendar(){const el=dateRef.current;if(!el)return;try{(el as any).showPicker?.()}catch{}el.focus();el.click()}
  async function submit(e:FormEvent){e.preventDefault();setError('');
   if(!validFullName(form.full_name)){setError('Informe seu nome e sobrenome válidos.');return}
-  if(!validBirthDate(form.birth_date)){setError('Informe uma data de nascimento válida.');return}
+  if(!validBirthDate(form.birth_date)){setError('Informe uma data de nascimento válida no formato DD/MM/AAAA.');return}
   if(!validCpf(form.cpf)){setError('Informe um CPF válido.');return}
   if(!validPhone(form.whatsapp)){setError('Informe um WhatsApp brasileiro válido com DDD.');return}
   if(!validEmail(form.email)){setError('Informe um e-mail válido.');return}
@@ -33,7 +40,7 @@ export default function Cadastro(){
  return <main className="register-page"><div className="register-shell"><section className="register-brand"><a className="brand-lockup" href="/"><img src={CHURCH_LOGO} alt="Logo Igreja Semeando Amor"/><div><strong>Semeando Memórias</strong><span>Igreja Semeando Amor</span></div></a><div className="register-copy"><span className="hero-kicker">Acesso às galerias</span><h1>Antes de entrar,<br/><em>queremos conhecer você.</em></h1><p>Seu cadastro é gratuito e libera o acesso às fotos dos eventos da Igreja Semeando Amor.</p><div className="register-benefits"><span>✓ Acesso às galerias publicadas</span><span>✓ Busca facial por selfie</span><span>✓ Cadastro feito uma única vez neste aparelho</span></div></div><div className="register-developer"><span>Tecnologia e desenvolvimento</span><img src={LEGACY_LOGO} alt="Legacy Solar"/><strong>Legacy Solar</strong></div></section>
  <form className="register-card" onSubmit={submit}><div><span className="eyebrow">Cadastro de visitante</span><h2>Libere seu acesso</h2><p className="muted">Preencha os dados abaixo. Leva menos de 1 minuto.</p></div>{error&&<p className="notice">{error}</p>}
  <label>Nome completo<input autoComplete="name" required placeholder="Seu nome completo" value={form.full_name} onChange={e=>setForm({...form,full_name:e.target.value})}/></label>
- <div className="form-row"><label>Data de nascimento<input type="date" required max={maxBirth} value={form.birth_date} onChange={e=>setForm({...form,birth_date:e.target.value})}/></label><label>CPF<input inputMode="numeric" required placeholder="000.000.000-00" maxLength={14} value={form.cpf} onChange={e=>setForm({...form,cpf:formatCpf(e.target.value)})}/></label></div>
+ <div className="form-row"><label>Data de nascimento<div style={{display:'grid',gridTemplateColumns:'1fr 48px',gap:8,position:'relative'}}><input inputMode="numeric" autoComplete="bday" required placeholder="DD/MM/AAAA" maxLength={10} value={birthText} onChange={e=>changeBirthText(e.target.value)}/><button type="button" className="btn alt" aria-label="Abrir calendário" title="Selecionar no calendário" onClick={openCalendar} style={{padding:0,fontSize:19}}>📅</button><input ref={dateRef} type="date" max={maxBirth} value={form.birth_date} onChange={e=>{setForm({...form,birth_date:e.target.value});setBirthText(isoToText(e.target.value))}} tabIndex={-1} aria-hidden="true" style={{position:'absolute',right:0,bottom:0,width:1,height:1,opacity:0,pointerEvents:'none'}}/></div><small className="muted" style={{fontWeight:500}}>Digite a data ou toque no calendário.</small></label><label>CPF<input inputMode="numeric" required placeholder="000.000.000-00" maxLength={14} value={form.cpf} onChange={e=>setForm({...form,cpf:formatCpf(e.target.value)})}/></label></div>
  <div className="form-row"><label>WhatsApp<input inputMode="tel" autoComplete="tel" required placeholder="(22) 99999-9999" value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:formatPhone(e.target.value)})}/></label><label>E-mail<input type="email" autoComplete="email" required placeholder="voce@exemplo.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label></div>
  <label>Tipo de moradia<select required value={form.housing_type} onChange={e=>setForm({...form,housing_type:e.target.value})}><option value="house">Casa</option><option value="apartment">Apartamento</option><option value="other">Outro</option></select></label>
  <label>Rua<input autoComplete="street-address" required placeholder="Nome da rua" value={form.street} onChange={e=>setForm({...form,street:e.target.value})}/></label>
