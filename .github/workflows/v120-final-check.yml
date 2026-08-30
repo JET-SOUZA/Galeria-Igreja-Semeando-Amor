@@ -1,5 +1,5 @@
 name: V12 final validation
-on: {push: {paths: ['live-v5/v120-final-integration.js','live-v5/v1110-service-decks.js','live-v5/v119-browser-pro.js','live-v5/v118-effects-engine.js','live-v5/v117-crossfader-ab.js','live-v5/v112-real-mixer.js','live-v5/arena.html','live-v5/v59-setlist.js','.github/workflows/v120-final-check.yml']}}
+on: {push: {paths: ['live-v5/v120-final-integration.js','live-v5/v1110-service-decks.js','live-v5/v119-browser-pro.js','live-v5/v118-effects-engine.js','live-v5/v117-crossfader-ab.js','live-v5/v116-mapping-pro.js','live-v5/v115-mapping-slices.js','live-v5/v114-advanced-output.js','live-v5/v113-media-playback.js','live-v5/v112-real-mixer.js','live-v5/arena.html','live-v5/v59-setlist.js','.github/workflows/v120-final-check.yml']}}
 jobs:
  validate:
   runs-on: ubuntu-latest
@@ -21,7 +21,9 @@ jobs:
       grep -q 'v120-final-integration.js' live-v5/v59-setlist.js
       grep -q 'class="output' live-v5/index.html
       grep -q 'class="outText' live-v5/index.html
-      grep -q 'V12 · SISTEMA OK' live-v5/v120-final-integration.js
+      grep -q 'V12 · MÓDULOS OK' live-v5/v120-final-integration.js
+      grep -q 'data-slice-id' live-v5/v115-mapping-slices.js
+      grep -q 'dataset.sliceId' live-v5/v116-mapping-pro.js
    - name: No secret service role in new modules
      run: |
       ! grep -RE 'service_role|SUPABASE_SERVICE_ROLE' live-v5/v11*.js live-v5/v120-final-integration.js
