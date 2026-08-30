@@ -1,0 +1,1 @@
+import ComplimentaryAccess from './ComplimentaryAccess';export default function ClientLayout({children}:{children:React.ReactNode}){return <><ComplimentaryAccess/>{children}</>}
