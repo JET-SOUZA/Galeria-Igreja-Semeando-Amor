@@ -22,7 +22,7 @@ jobs:
       grep -q 'class="output' live-v5/index.html
       grep -q 'class="outText' live-v5/index.html
       grep -q 'V12 · MÓDULOS OK' live-v5/v120-final-integration.js
-      grep -q 'data-slice-id' live-v5/v115-mapping-slices.js
+      grep -q 'dataset.sliceId' live-v5/v115-mapping-slices.js
       grep -q 'dataset.sliceId' live-v5/v116-mapping-pro.js
    - name: No secret service role in new modules
      run: |
