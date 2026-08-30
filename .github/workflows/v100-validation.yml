@@ -38,7 +38,18 @@ jobs:
           const songs=[{id:'s1',title:'Louvor Teste',artist:'Igreja'}];
           const slides=[{id:'p1',label:'Verso 1',body:'Linha 1\nLinha 2',sort_order:0},{id:'p2',label:'Refrão',body:'Refrão aqui',sort_order:1}];
           const media=[{id:'m1',title:'Fundo Azul',type:'image',url:'https://example.test/bg.jpg',created_at:'2026-01-01'}];
-          function query(table){let data=table==='sl_songs'?songs:table==='sl_media'?media:slides;const chain={select(){return chain},order(){return Promise.resolve({data,error:null})},limit(){return Promise.resolve({data,error:null})},eq(){return chain}};return chain}
+          function query(table){
+            const data=table==='sl_songs'?songs:table==='sl_media'?media:slides;
+            let resolveOnOrder=table!=='sl_media';
+            const result=()=>Promise.resolve({data,error:null});
+            const chain={
+              select(){return chain},
+              eq(){return chain},
+              order(){return resolveOnOrder?result():chain},
+              limit(){return result()}
+            };
+            return chain;
+          }
           w.supabase={createClient:()=>({from:query})};
           let takePart=-1,compTake=0,compClear=0;
           w.SemeandoV84={chooseSong:()=>{},takePart:i=>{takePart=i}};
