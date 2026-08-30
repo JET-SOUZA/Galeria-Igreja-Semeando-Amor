@@ -1,0 +1,146 @@
+name: V9.7 Validation
+
+on:
+  push:
+    paths:
+      - 'live-v5/v59-setlist.js'
+      - 'live-v5/v97-column-scenes.js'
+      - '.github/workflows/v97-validation.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and bootstrap checks
+        shell: bash
+        run: |
+          node --check live-v5/v59-setlist.js
+          node --check live-v5/v90-live-visual-grid.js
+          node --check live-v5/v91-deck-library.js
+          node --check live-v5/v92-layer-clips.js
+          node --check live-v5/v93-composition-preview.js
+          node --check live-v5/v94-inspector-pro.js
+          node --check live-v5/v95-fx-chain.js
+          node --check live-v5/v96-operator-grid-pro.js
+          node --check live-v5/v97-column-scenes.js
+          grep -q "v97-column-scenes.js?v=9702" live-v5/v59-setlist.js
+          grep -q "sl_v94_clip_fx" live-v5/v97-column-scenes.js
+          grep -q "sl_v97_visual_presets" live-v5/v97-column-scenes.js
+          grep -q "copy:copyColumn" live-v5/v97-column-scenes.js
+          grep -q "paste:pasteColumn" live-v5/v97-column-scenes.js
+          grep -q "applyPreset" live-v5/v97-column-scenes.js
+          ! grep -qi "service_role" live-v5/v97-column-scenes.js
+      - name: Install DOM test dependency
+        run: npm install --no-save --ignore-scripts jsdom@26.1.0
+      - name: Column Scenes behavior test
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const assert = require('assert');
+          const { JSDOM } = require('jsdom');
+
+          const dom = new JSDOM(`<!doctype html><body>
+            <div id="v90grid">
+              <div id="v9deckname">Ah Jesus</div>
+              <div id="v9prev"></div><div id="v9live"></div>
+              <div class="v9gridwrap"><div id="v9grid">
+                <div class="v9head trigger" data-col="0">COLUMN 1</div>
+                <div class="v9head trigger" data-col="1">COLUMN 2</div>
+                <div class="v9head trigger" data-col="2">COLUMN 3</div>
+                <button class="v9clip" data-part="0"><b>1 · Verso</b><span>Trecho um</span></button>
+                <button class="v9clip" data-part="1"><b>2 · Refrão</b><span>Trecho dois</span></button>
+                <button class="v9clip" data-part="2"><b>3 · Ponte</b><span>Trecho três</span></button>
+              </div></div>
+              <div class="v9prop"></div>
+            </div>
+          </body>`, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+          const w = dom.window;
+          const hit = () => {};
+          w.SemeandoV84 = { getSong: () => ({id:'song-1',title:'Ah Jesus'}) };
+          w.SemeandoV91 = { getDecks: () => [{id:'song-1',title:'Ah Jesus'}] };
+          w.SemeandoV92 = { cells: hit };
+          w.SemeandoV93 = { preview: hit };
+          w.SemeandoV94 = { applyToHost: hit };
+          w.SemeandoV95 = { applyColumn: hit };
+          w.SemeandoV96 = { refresh: hit, applyLayerState: hit };
+          w.SemeandoV90 = { previewPart: hit };
+          w.SemeandoV75 = { toast: hit };
+
+          w.localStorage.setItem('sl_v92_cells', JSON.stringify({
+            'Ah Jesus|background|0': {id:'bg1',title:'Fundo 1',url:'bg.jpg',type:'image'},
+            'Ah Jesus|content|0': {id:'vid1',title:'Video 1',url:'v.mp4',type:'video'}
+          }));
+          w.localStorage.setItem('sl_v94_clip_fx', JSON.stringify({
+            'Ah Jesus|text|0': {opacity:95,scale:115,x:50,y:50,blend:'normal',darken:20,transition:'fade',lyricAnim:'rise'},
+            'Ah Jesus|background|0': {opacity:100,scale:105,x:50,y:50,blend:'normal',darken:18,transition:'fade'}
+          }));
+          w.localStorage.setItem('sl_v95_fx_chain', JSON.stringify({
+            'Ah Jesus|text|0': [{type:'glow',on:true,value:30}]
+          }));
+          w.localStorage.setItem('sl_v91_clip_meta', JSON.stringify({
+            'song-1:0': {transition:'fade',trigger:'preview',color:'purple'}
+          }));
+
+          const code = fs.readFileSync('live-v5/v97-column-scenes.js','utf8');
+          w.eval(code);
+          w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+
+          setTimeout(() => {
+            try {
+              assert.ok(w.document.querySelector('#v97bar'), 'V9.7 toolbar did not mount');
+              for (const label of ['Salvar Scene','Duplicar →','Copiar','Colar','Aplicar Scene','Aplicar preset','Salvar preset']) {
+                assert.ok([...w.document.querySelectorAll('button')].some(b => b.textContent.trim() === label), `Missing button: ${label}`);
+              }
+              const snap = w.SemeandoV97.captureSnapshot(0);
+              assert.equal(snap.visual.text.scale, 115, 'Inspector settings were not captured from sl_v94_clip_fx');
+              assert.equal(snap.lyrics.body, 'Trecho um');
+              assert.equal(snap.cells.background.title, 'Fundo 1');
+
+              w.SemeandoV97.save(0,'Verso Suave','#336699');
+              let scenes = JSON.parse(w.localStorage.getItem('sl_v97_column_scenes'));
+              assert.equal(scenes['Ah Jesus|0'].name, 'Verso Suave');
+              assert.equal(scenes['Ah Jesus|0'].version, 2);
+
+              w.SemeandoV97.apply(scenes['Ah Jesus|0'],1);
+              let cells = JSON.parse(w.localStorage.getItem('sl_v92_cells'));
+              let vis = JSON.parse(w.localStorage.getItem('sl_v94_clip_fx'));
+              let fx = JSON.parse(w.localStorage.getItem('sl_v95_fx_chain'));
+              let meta = JSON.parse(w.localStorage.getItem('sl_v91_clip_meta'));
+              assert.equal(cells['Ah Jesus|background|1'].title, 'Fundo 1');
+              assert.equal(vis['Ah Jesus|text|1'].scale, 115);
+              assert.equal(fx['Ah Jesus|text|1'][0].type, 'glow');
+              assert.equal(meta['song-1:1'].color, 'purple');
+
+              w.SemeandoV97.copy(0);
+              w.SemeandoV97.paste(2);
+              cells = JSON.parse(w.localStorage.getItem('sl_v92_cells'));
+              assert.equal(cells['Ah Jesus|content|2'].title, 'Video 1');
+
+              w.SemeandoV97.applyPreset('worship',1);
+              vis = JSON.parse(w.localStorage.getItem('sl_v94_clip_fx'));
+              fx = JSON.parse(w.localStorage.getItem('sl_v95_fx_chain'));
+              assert.equal(vis['Ah Jesus|text|1'].lyricAnim, 'rise');
+              assert.equal(fx['Ah Jesus|text|1'][0].type, 'glow');
+
+              const pid = w.SemeandoV97.savePreset('Meu Worship',1);
+              const presets = JSON.parse(w.localStorage.getItem('sl_v97_visual_presets'));
+              assert.equal(pid, 'custom:meu-worship');
+              assert.ok(presets[pid]);
+
+              assert.ok(code.includes('@media(max-width:700px)'), 'Mobile breakpoint missing');
+              console.log('V9.7 behavior test passed');
+              w.close();
+            } catch (e) {
+              console.error(e);
+              w.close();
+              process.exitCode = 1;
+            }
+          }, 350);
+          NODE
