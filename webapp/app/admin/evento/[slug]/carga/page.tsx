@@ -2,7 +2,7 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
 import * as tus from 'tus-js-client';
 import heic2any from 'heic2any';
-import {SB,KEY,adminHeaders,session} from '../../../../../../lib/sb';
+import {SB,KEY,adminHeaders,session} from '../../../../../lib/sb';
 
 type EventRow={id:string;title:string;slug:string;organization_id:string;gallery_access:string;face_search_enabled:boolean};
 type ServerItem={client_key:string;status:string;error_message?:string|null;file_name:string;size_bytes:number};
