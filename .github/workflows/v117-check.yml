@@ -1,0 +1,21 @@
+name: V11.7 validation
+on: {push: {paths: ['live-v5/v117-crossfader-ab.js','live-v5/v112-real-mixer.js','live-v5/arena.html','live-v5/v59-setlist.js','.github/workflows/v117-check.yml']}}
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: |
+          node --check live-v5/v117-crossfader-ab.js
+          node --check live-v5/v112-real-mixer.js
+          node --check live-v5/v59-setlist.js
+      - run: |
+          grep -q 'SemeandoV117' live-v5/v117-crossfader-ab.js
+          grep -q 'busFactor' live-v5/v112-real-mixer.js
+          grep -q 'v117-crossfader-ab.js' live-v5/arena.html
+          grep -q 'v117-crossfader-ab.js' live-v5/v59-setlist.js
+          grep -q 'TAKE A' live-v5/v117-crossfader-ab.js
+          grep -q 'TAKE B' live-v5/v117-crossfader-ab.js
+          grep -q 'EQUAL POWER' live-v5/v117-crossfader-ab.js
