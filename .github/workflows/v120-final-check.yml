@@ -1,5 +1,5 @@
 name: V12 final validation
-on: {push: {paths: ['live-v5/v120-final-integration.js','live-v5/v1110-service-decks.js','live-v5/v119-browser-pro.js','live-v5/v118-effects-engine.js','live-v5/v117-crossfader-ab.js','live-v5/v116-mapping-pro.js','live-v5/v115-mapping-slices.js','live-v5/v114-advanced-output.js','live-v5/v113-media-playback.js','live-v5/v112-real-mixer.js','live-v5/arena.html','live-v5/v59-setlist.js','.github/workflows/v120-final-check.yml']}}
+on: {push: {paths: ['live-v5/v121-live-song-direct.js','live-v5/v120-final-integration.js','live-v5/v1110-service-decks.js','live-v5/v119-browser-pro.js','live-v5/v118-effects-engine.js','live-v5/v117-crossfader-ab.js','live-v5/v116-mapping-pro.js','live-v5/v115-mapping-slices.js','live-v5/v114-advanced-output.js','live-v5/v113-media-playback.js','live-v5/v112-real-mixer.js','live-v5/v100-arena-workspace.js','live-v5/v110-arena-pro.js','live-v5/arena.html','live-v5/v59-setlist.js','.github/workflows/v120-final-check.yml']}}
 jobs:
  validate:
   runs-on: ubuntu-latest
@@ -7,23 +7,28 @@ jobs:
    - uses: actions/checkout@v4
    - uses: actions/setup-node@v4
      with: {node-version: '22'}
-   - name: Syntax all new runtime modules
+   - name: Syntax all current runtime modules
      run: |
-      for f in live-v5/v112-real-mixer.js live-v5/v113-media-playback.js live-v5/v114-advanced-output.js live-v5/v115-mapping-slices.js live-v5/v116-mapping-pro.js live-v5/v117-crossfader-ab.js live-v5/v118-effects-engine.js live-v5/v119-browser-pro.js live-v5/v1110-service-decks.js live-v5/v120-final-integration.js live-v5/v59-setlist.js; do node --check "$f"; done
+      for f in live-v5/v100-arena-workspace.js live-v5/v110-arena-pro.js live-v5/v112-real-mixer.js live-v5/v113-media-playback.js live-v5/v114-advanced-output.js live-v5/v115-mapping-slices.js live-v5/v116-mapping-pro.js live-v5/v117-crossfader-ab.js live-v5/v118-effects-engine.js live-v5/v119-browser-pro.js live-v5/v1110-service-decks.js live-v5/v120-final-integration.js live-v5/v121-live-song-direct.js live-v5/v59-setlist.js; do node --check "$f"; done
    - name: Integration contracts
      run: |
       grep -q 'SemeandoV120' live-v5/v120-final-integration.js
+      grep -q 'SemeandoV121' live-v5/v121-live-song-direct.js
+      grep -q 'takeColumn' live-v5/v121-live-song-direct.js
+      grep -q 'publishText' live-v5/v121-live-song-direct.js
+      grep -q 'v121-live-song-direct.js' live-v5/arena.html
+      grep -q 'v121-live-song-direct.js' live-v5/v59-setlist.js
       grep -q 'SemeandoV1110' live-v5/v1110-service-decks.js
       grep -q 'SemeandoV119' live-v5/v119-browser-pro.js
       grep -q 'SemeandoV118' live-v5/v118-effects-engine.js
       grep -q 'SemeandoV117' live-v5/v117-crossfader-ab.js
-      grep -q 'v120-final-integration.js' live-v5/arena.html
-      grep -q 'v120-final-integration.js' live-v5/v59-setlist.js
       grep -q 'class="output' live-v5/index.html
       grep -q 'class="outText' live-v5/index.html
       grep -q 'V12 · MÓDULOS OK' live-v5/v120-final-integration.js
       grep -q 'dataset.sliceId' live-v5/v115-mapping-slices.js
       grep -q 'dataset.sliceId' live-v5/v116-mapping-pro.js
-   - name: No secret service role in new modules
+      test ! -f live-v5/v101-song-parts-control.js
+      test ! -f live-v5/v851-live-song-strip.js
+   - name: No secret service role in current modules
      run: |
-      ! grep -RE 'service_role|SUPABASE_SERVICE_ROLE' live-v5/v11*.js live-v5/v120-final-integration.js
+      ! grep -RE 'service_role|SUPABASE_SERVICE_ROLE' live-v5/v10*.js live-v5/v11*.js live-v5/v12*.js
