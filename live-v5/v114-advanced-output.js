@@ -1,23 +1,167 @@
-(()=>{'use strict';
-const KEY='sl_v114_output',CH='sl-v114-output',q=new URLSearchParams(location.search),isOutput=q.get('view')==='output';
-const $=s=>document.querySelector(s);let bc=null;
+(()=>{
+'use strict';
+const KEY='sl_v114_output';
+const CH='sl-v114-output';
+const params=new URLSearchParams(location.search);
+const isOutput=params.get('view')==='output';
+const $=s=>document.querySelector(s);
+let bc=null;
 const DEF={width:1920,height:1080,scale:100,x:0,y:0,cropTop:0,cropRight:0,cropBottom:0,cropLeft:0,skewX:0,skewY:0,fit:'contain'};
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,Number(v)||0));
-function load(){try{return{...DEF,...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch{return{...DEF}}}
-function save(s){const n={...DEF,...s,width:clamp(s.width,320,7680),height:clamp(s.height,240,4320),scale:clamp(s.scale,25,200),x:clamp(s.x,-50,50),y:clamp(s.y,-50,50),cropTop:clamp(s.cropTop,0,45),cropRight:clamp(s.cropRight,0,45),cropBottom:clamp(s.cropBottom,0,45),cropLeft:clamp(s.cropLeft,0,45),skewX:clamp(s.skewX,-20,20),skewY:clamp(s.skewY,-20,20)};localStorage.setItem(KEY,JSON.stringify(n));try{bc?.postMessage(n)}catch{};apply(n);paint(n);return n}
-function css(){if($('#v114css'))return;const s=document.createElement('style');s.id='v114css';s.textContent=`
-#v114btn{border-color:#4f6070}.v114modal{position:absolute;inset:48px 10px 58px auto;width:390px;z-index:120;background:#081015f5;border:1px solid #34414b;border-radius:7px;box-shadow:0 22px 60px #000c;padding:10px;color:#e5edf2;display:none;overflow:auto}.v114modal.on{display:block}.v114head{display:flex;align-items:center;gap:6px;margin-bottom:9px}.v114head b{font:950 8px system-ui;letter-spacing:.08em}.v114head small{color:#71808b;font:750 6px system-ui}.v114sp{flex:1}.v114close,.v114action{border:1px solid #34414b;background:#11191f;color:#dfe7ec;border-radius:4px;padding:6px 8px;font:850 7px system-ui}.v114action.primary{background:#f57c00;border-color:#ff9b2e;color:#17100a}.v114action.good{border-color:#00a873;color:#8fffd7;background:#073326}.v114grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.v114field{margin:6px 0}.v114field label{display:flex;justify-content:space-between;color:#81909a;font:800 6px system-ui;margin-bottom:4px}.v114field input,.v114field select{width:100%;box-sizing:border-box;background:#10181e;border:1px solid #34414b;color:#fff;border-radius:4px;padding:6px;font:800 7px system-ui}.v114field input[type=range]{padding:0;accent-color:#f57c00}.v114section{border-top:1px solid #263139;margin-top:9px;padding-top:8px}.v114section h5{margin:0 0 5px;color:#71808b;font:950 6px system-ui;letter-spacing:.1em}.v114actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:9px}.v114hint{margin-top:7px;color:#66757f;font:700 6px/1.4 system-ui}.v114outbadge{position:fixed;left:10px;bottom:10px;z-index:20000;border:1px solid #34414b;background:#071016d9;color:#94a3ad;border-radius:5px;padding:6px 8px;font:800 7px system-ui}.v114fs{position:fixed;right:12px;top:12px;z-index:20001;border:1px solid #5b6873;background:#101820dc;color:#fff;border-radius:5px;padding:8px 10px;font:900 8px system-ui}.v114fs:hover{border-color:#f57c00}.v114-output-host{transform-origin:center center!important;will-change:transform,clip-path;}
-`;document.head.appendChild(s)}
-function host(){return $('.output')||$('#output')||$('#screen')||document.body}
-function apply(s=load()){if(!isOutput)return;css();const h=host();h.classList.add('v114-output-host');const scale=s.scale/100;h.style.transform=`translate(${s.x}%,${s.y}%) scale(${scale}) skew(${s.skewX}deg,${s.skewY}deg)`;h.style.clipPath=`inset(${s.cropTop}% ${s.cropRight}% ${s.cropBottom}% ${s.cropLeft}%)`;h.style.aspectRatio=`${s.width}/${s.height}`;h.dataset.targetResolution=`${s.width}x${s.height}`;h.dataset.fit=s.fit||'contain';const b=$('#v114outbadge');if(b)b.textContent=`OUTPUT ${s.width}×${s.height} · ${Math.round(s.scale)}% · ${screen.width}×${screen.height}`}
-function field(id,label,min,max,step,val){return `<div class="v114field"><label>${label}<span id="${id}v">${val}</span></label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${val}"></div>`}
-function ensureOperator(){const root=$('#v100arena');if(!root||$('#v114panel'))return false;css();const top=root.querySelector('.v100top');if(!top)return false;const btn=document.createElement('button');btn.id='v114btn';btn.className='v100btn';btn.textContent='OUTPUT';btn.title='Advanced Output';top.insertBefore(btn,top.querySelector('.v100sp')||top.lastChild);const p=document.createElement('aside');p.id='v114panel';p.className='v114modal';root.appendChild(p);btn.onclick=()=>p.classList.toggle('on');render();return true}
-function render(){const p=$('#v114panel');if(!p)return;const s=load();p.innerHTML=`<div class="v114head"><div><b>V11.4 · ADVANCED OUTPUT</b><small>Segundo monitor, escala, crop e alinhamento</small></div><span class="v114sp"></span><button class="v114close" id="v114close">×</button></div><div class="v114grid"><div class="v114field"><label>RESOLUÇÃO</label><select id="v114preset"><option value="1920x1080">Full HD · 1920×1080</option><option value="1280x720">HD · 1280×720</option><option value="3840x2160">4K · 3840×2160</option><option value="custom">Personalizada</option></select></div><div class="v114grid"><div class="v114field"><label>LARGURA</label><input id="v114w" type="number" min="320" max="7680" value="${s.width}"></div><div class="v114field"><label>ALTURA</label><input id="v114h" type="number" min="240" max="4320" value="${s.height}"></div></div></div>${field('v114scale','ESCALA',25,200,1,s.scale)}<div class="v114grid">${field('v114x','POSIÇÃO X',-50,50,1,s.x)}${field('v114y','POSIÇÃO Y',-50,50,1,s.y)}</div><div class="v114section"><h5>CROP / SAFE OUTPUT</h5><div class="v114grid">${field('v114ct','TOPO',0,45,1,s.cropTop)}${field('v114cr','DIREITA',0,45,1,s.cropRight)}${field('v114cb','BASE',0,45,1,s.cropBottom)}${field('v114cl','ESQUERDA',0,45,1,s.cropLeft)}</div></div><div class="v114section"><h5>KEYSTONE LITE</h5><div class="v114grid">${field('v114sx','INCLINAÇÃO X',-20,20,.5,s.skewX)}${field('v114sy','INCLINAÇÃO Y',-20,20,.5,s.skewY)}</div><div class="v114hint">Ajuste rápido por inclinação. Mapeamento de 4 cantos/Slices será o próximo nível do Output Engine.</div></div><div class="v114actions"><button class="v114action primary" id="v114open">ABRIR TELÃO ↗</button><button class="v114action good" id="v114secondary">ABRIR NO 2º MONITOR</button><button class="v114action" id="v114reset">RESTAURAR</button></div><div class="v114hint">O navegador pode pedir permissão para identificar o segundo monitor. Quando não permitir posicionamento automático, a saída abre em nova janela para você mover ao projetor e entrar em tela cheia.</div>`;bind();paint(s)}
-function bind(){const map={v114scale:'scale',v114x:'x',v114y:'y',v114ct:'cropTop',v114cr:'cropRight',v114cb:'cropBottom',v114cl:'cropLeft',v114sx:'skewX',v114sy:'skewY'};Object.entries(map).forEach(([id,k])=>{$('#'+id)?.addEventListener('input',e=>{const s=load();s[k]=Number(e.target.value);save(s);const v=$('#'+id+'v');if(v)v.textContent=e.target.value})});$('#v114w')?.addEventListener('change',e=>save({...load(),width:Number(e.target.value)}));$('#v114h')?.addEventListener('change',e=>save({...load(),height:Number(e.target.value)}));$('#v114preset')?.addEventListener('change',e=>{if(e.target.value==='custom')return;const [width,height]=e.target.value.split('x').map(Number);save({...load(),width,height});render()});$('#v114close').onclick=()=>$('#v114panel').classList.remove('on');$('#v114reset').onclick=()=>{save({...DEF});render()};$('#v114open').onclick=()=>openOutput(false);$('#v114secondary').onclick=()=>openOutput(true)}
-function paint(s=load()){const preset=$('#v114preset');if(preset){const k=`${s.width}x${s.height}`;preset.value=[...preset.options].some(o=>o.value===k)?k:'custom'}for(const [id,v] of [['v114scale',s.scale],['v114x',s.x],['v114y',s.y],['v114ct',s.cropTop],['v114cr',s.cropRight],['v114cb',s.cropBottom],['v114cl',s.cropLeft],['v114sx',s.skewX],['v114sy',s.skewY]]){const e=$('#'+id),t=$('#'+id+'v');if(e)e.value=v;if(t)t.textContent=v}if($('#v114w'))$('#v114w').value=s.width;if($('#v114h'))$('#v114h').value=s.height}
-function outputUrl(){const u=new URL(location.href);u.search='';u.searchParams.set('view','output');u.searchParams.set('channel','audience');u.searchParams.set('v','11401');return u.href}
-async function openOutput(second){let features='popup=yes,width=1280,height=720';if(second&&'getScreenDetails'in window){try{const d=await window.getScreenDetails();const cur=d.currentScreen;const target=d.screens.find(x=>x!==cur)||d.screens[0];if(target)features=`popup=yes,left=${target.availLeft},top=${target.availTop},width=${target.availWidth},height=${target.availHeight}`;}catch(e){console.warn('Segundo monitor sem permissão',e)}}const w=window.open(outputUrl(),'semeando-output',features);if(!w)window.SemeandoV75?.toast?.('Permita pop-ups para abrir o telão');else setTimeout(()=>{try{w.focus()}catch{}},250)}
-function ensureOutputUi(){if(!isOutput||$('#v114fs'))return;css();const b=document.createElement('button');b.id='v114fs';b.className='v114fs';b.textContent='TELA CHEIA';b.onclick=async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen()}catch{}};document.body.appendChild(b);const info=document.createElement('div');info.id='v114outbadge';info.className='v114outbadge';document.body.appendChild(info);document.addEventListener('fullscreenchange',()=>{b.textContent=document.fullscreenElement?'SAIR DA TELA CHEIA':'TELA CHEIA'});apply(load())}
-function boot(){css();try{bc=new BroadcastChannel(CH);bc.onmessage=e=>{if(e.data)apply({...DEF,...e.data})}}catch{};addEventListener('storage',e=>{if(e.key===KEY)apply(load())});if(isOutput){ensureOutputUi();apply(load())}else{let n=0,t=setInterval(()=>{if(ensureOperator()){clearInterval(t)}else if(++n>200)clearInterval(t)},100);window.SemeandoV114={get:load,set:save,apply,openOutput}}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+const clamp=(v,min,max)=>Math.max(min,Math.min(max,Number(v)||0));
+
+function load(){
+  try{return {...DEF,...JSON.parse(localStorage.getItem(KEY)||'{}')}}
+  catch{return {...DEF}}
+}
+
+function clean(s){
+  return {
+    ...DEF,...s,
+    width:clamp(s.width,320,7680),height:clamp(s.height,240,4320),scale:clamp(s.scale,25,200),
+    x:clamp(s.x,-50,50),y:clamp(s.y,-50,50),cropTop:clamp(s.cropTop,0,45),cropRight:clamp(s.cropRight,0,45),
+    cropBottom:clamp(s.cropBottom,0,45),cropLeft:clamp(s.cropLeft,0,45),skewX:clamp(s.skewX,-20,20),skewY:clamp(s.skewY,-20,20)
+  };
+}
+
+function save(s){
+  const n=clean(s);
+  localStorage.setItem(KEY,JSON.stringify(n));
+  try{if(bc)bc.postMessage(n)}catch{}
+  apply(n);
+  paint(n);
+  return n;
+}
+
+function css(){
+  if($('#v114css'))return;
+  const st=document.createElement('style');
+  st.id='v114css';
+  st.textContent=`#v114btn{border-color:#4f6070}.v114modal{position:absolute;inset:48px 10px 58px auto;width:390px;z-index:120;background:#081015f5;border:1px solid #34414b;border-radius:7px;box-shadow:0 22px 60px #000c;padding:10px;color:#e5edf2;display:none;overflow:auto}.v114modal.on{display:block}.v114head{display:flex;align-items:center;gap:6px;margin-bottom:9px}.v114head b{font:950 8px system-ui;letter-spacing:.08em}.v114head small{color:#71808b;font:750 6px system-ui}.v114sp{flex:1}.v114close,.v114action{border:1px solid #34414b;background:#11191f;color:#dfe7ec;border-radius:4px;padding:6px 8px;font:850 7px system-ui}.v114action.primary{background:#f57c00;border-color:#ff9b2e;color:#17100a}.v114action.good{border-color:#00a873;color:#8fffd7;background:#073326}.v114grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.v114field{margin:6px 0}.v114field label{display:flex;justify-content:space-between;color:#81909a;font:800 6px system-ui;margin-bottom:4px}.v114field input,.v114field select{width:100%;box-sizing:border-box;background:#10181e;border:1px solid #34414b;color:#fff;border-radius:4px;padding:6px;font:800 7px system-ui}.v114field input[type=range]{padding:0;accent-color:#f57c00}.v114section{border-top:1px solid #263139;margin-top:9px;padding-top:8px}.v114section h5{margin:0 0 5px;color:#71808b;font:950 6px system-ui;letter-spacing:.1em}.v114actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:9px}.v114hint{margin-top:7px;color:#66757f;font:700 6px/1.4 system-ui}.v114outbadge{position:fixed;left:10px;bottom:10px;z-index:20000;border:1px solid #34414b;background:#071016d9;color:#94a3ad;border-radius:5px;padding:6px 8px;font:800 7px system-ui}.v114fs{position:fixed;right:12px;top:12px;z-index:20001;border:1px solid #5b6873;background:#101820dc;color:#fff;border-radius:5px;padding:8px 10px;font:900 8px system-ui}.v114-output-host{transform-origin:center center!important;will-change:transform,clip-path}`;
+  document.head.appendChild(st);
+}
+
+function outputHost(){return $('.output')||$('#output')||$('#screen')||document.body}
+
+function apply(s=load()){
+  if(!isOutput)return;
+  css();
+  const h=outputHost();
+  const n=clean(s);
+  h.classList.add('v114-output-host');
+  h.style.transform=`translate(${n.x}%,${n.y}%) scale(${n.scale/100}) skew(${n.skewX}deg,${n.skewY}deg)`;
+  h.style.clipPath=`inset(${n.cropTop}% ${n.cropRight}% ${n.cropBottom}% ${n.cropLeft}%)`;
+  h.style.aspectRatio=`${n.width}/${n.height}`;
+  h.dataset.targetResolution=`${n.width}x${n.height}`;
+  const badge=$('#v114outbadge');
+  if(badge)badge.textContent=`OUTPUT ${n.width}×${n.height} · ${Math.round(n.scale)}% · TELA ${screen.width}×${screen.height}`;
+}
+
+function slider(id,label,min,max,step,value){
+  return `<div class="v114field"><label>${label}<span id="${id}v">${value}</span></label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></div>`;
+}
+
+function ensureOperator(){
+  const root=$('#v100arena');
+  if(!root||$('#v114panel'))return false;
+  const top=root.querySelector('.v100top');
+  if(!top)return false;
+  css();
+  const btn=document.createElement('button');
+  btn.id='v114btn';btn.className='v100btn';btn.textContent='OUTPUT';btn.title='Advanced Output';
+  top.insertBefore(btn,top.querySelector('.v100sp')||top.lastChild);
+  const panel=document.createElement('aside');
+  panel.id='v114panel';panel.className='v114modal';root.appendChild(panel);
+  btn.addEventListener('click',()=>panel.classList.toggle('on'));
+  render();
+  return true;
+}
+
+function render(){
+  const panel=$('#v114panel');
+  if(!panel)return;
+  const s=load();
+  panel.innerHTML=`<div class="v114head"><div><b>V11.4 · ADVANCED OUTPUT</b><small>Segundo monitor, escala, crop e alinhamento</small></div><span class="v114sp"></span><button class="v114close" id="v114close">×</button></div><div class="v114grid"><div class="v114field"><label>RESOLUÇÃO</label><select id="v114preset"><option value="1920x1080">Full HD · 1920×1080</option><option value="1280x720">HD · 1280×720</option><option value="3840x2160">4K · 3840×2160</option><option value="custom">Personalizada</option></select></div><div class="v114grid"><div class="v114field"><label>LARGURA</label><input id="v114w" type="number" min="320" max="7680" value="${s.width}"></div><div class="v114field"><label>ALTURA</label><input id="v114h" type="number" min="240" max="4320" value="${s.height}"></div></div></div>${slider('v114scale','ESCALA',25,200,1,s.scale)}<div class="v114grid">${slider('v114x','POSIÇÃO X',-50,50,1,s.x)}${slider('v114y','POSIÇÃO Y',-50,50,1,s.y)}</div><div class="v114section"><h5>CROP / SAFE OUTPUT</h5><div class="v114grid">${slider('v114ct','TOPO',0,45,1,s.cropTop)}${slider('v114cr','DIREITA',0,45,1,s.cropRight)}${slider('v114cb','BASE',0,45,1,s.cropBottom)}${slider('v114cl','ESQUERDA',0,45,1,s.cropLeft)}</div></div><div class="v114section"><h5>KEYSTONE LITE</h5><div class="v114grid">${slider('v114sx','INCLINAÇÃO X',-20,20,.5,s.skewX)}${slider('v114sy','INCLINAÇÃO Y',-20,20,.5,s.skewY)}</div><div class="v114hint">Ajuste rápido por inclinação. Mapeamento de quatro cantos e Slices entra no próximo nível.</div></div><div class="v114actions"><button class="v114action primary" id="v114open">ABRIR TELÃO ↗</button><button class="v114action good" id="v114secondary">ABRIR NO 2º MONITOR</button><button class="v114action" id="v114reset">RESTAURAR</button></div><div class="v114hint">Se o navegador não permitir posicionamento automático, a saída abre em nova janela para mover ao projetor e entrar em tela cheia.</div>`;
+  bind();
+  paint(s);
+}
+
+function bind(){
+  const map={v114scale:'scale',v114x:'x',v114y:'y',v114ct:'cropTop',v114cr:'cropRight',v114cb:'cropBottom',v114cl:'cropLeft',v114sx:'skewX',v114sy:'skewY'};
+  Object.entries(map).forEach(([id,key])=>{
+    const el=$('#'+id);
+    if(!el)return;
+    el.addEventListener('input',e=>{
+      const s=load();s[key]=Number(e.target.value);save(s);
+      const label=$('#'+id+'v');if(label)label.textContent=e.target.value;
+    });
+  });
+  $('#v114w').addEventListener('change',e=>save({...load(),width:Number(e.target.value)}));
+  $('#v114h').addEventListener('change',e=>save({...load(),height:Number(e.target.value)}));
+  $('#v114preset').addEventListener('change',e=>{
+    if(e.target.value==='custom')return;
+    const dims=e.target.value.split('x').map(Number);
+    save({...load(),width:dims[0],height:dims[1]});render();
+  });
+  $('#v114close').addEventListener('click',()=>$('#v114panel').classList.remove('on'));
+  $('#v114reset').addEventListener('click',()=>{save({...DEF});render()});
+  $('#v114open').addEventListener('click',()=>openOutput(false));
+  $('#v114secondary').addEventListener('click',()=>openOutput(true));
+}
+
+function paint(s=load()){
+  const preset=$('#v114preset');
+  if(preset){const key=`${s.width}x${s.height}`;preset.value=Array.from(preset.options).some(o=>o.value===key)?key:'custom'}
+  const values={v114scale:s.scale,v114x:s.x,v114y:s.y,v114ct:s.cropTop,v114cr:s.cropRight,v114cb:s.cropBottom,v114cl:s.cropLeft,v114sx:s.skewX,v114sy:s.skewY};
+  Object.entries(values).forEach(([id,value])=>{const el=$('#'+id),label=$('#'+id+'v');if(el)el.value=value;if(label)label.textContent=value});
+  if($('#v114w'))$('#v114w').value=s.width;
+  if($('#v114h'))$('#v114h').value=s.height;
+}
+
+function outputUrl(){
+  const u=new URL(location.href);
+  u.search='';
+  u.searchParams.set('view','output');
+  u.searchParams.set('channel','audience');
+  u.searchParams.set('v','11402');
+  return u.href;
+}
+
+async function openOutput(second){
+  let features='popup=yes,width=1280,height=720';
+  if(second&&('getScreenDetails' in window)){
+    try{
+      const details=await window.getScreenDetails();
+      const target=details.screens.find(s=>s!==details.currentScreen)||details.screens[0];
+      if(target)features=`popup=yes,left=${target.availLeft},top=${target.availTop},width=${target.availWidth},height=${target.availHeight}`;
+    }catch(e){console.warn('Segundo monitor sem permissão',e)}
+  }
+  const w=window.open(outputUrl(),'semeando-output',features);
+  if(!w){if(window.SemeandoV75)window.SemeandoV75.toast('Permita pop-ups para abrir o telão');return}
+  setTimeout(()=>{try{w.focus()}catch{}},250);
+}
+
+function ensureOutputUi(){
+  if(!isOutput||$('#v114fs'))return;
+  css();
+  const btn=document.createElement('button');
+  btn.id='v114fs';btn.className='v114fs';btn.textContent='TELA CHEIA';
+  btn.addEventListener('click',async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen()}catch{}});
+  document.body.appendChild(btn);
+  const info=document.createElement('div');info.id='v114outbadge';info.className='v114outbadge';document.body.appendChild(info);
+  document.addEventListener('fullscreenchange',()=>{btn.textContent=document.fullscreenElement?'SAIR DA TELA CHEIA':'TELA CHEIA'});
+  apply(load());
+}
+
+function boot(){
+  css();
+  try{bc=new BroadcastChannel(CH);bc.onmessage=e=>{if(e.data)apply({...DEF,...e.data})}}catch{}
+  addEventListener('storage',e=>{if(e.key===KEY)apply(load())});
+  if(isOutput){ensureOutputUi();apply(load());return}
+  let tries=0;
+  const timer=setInterval(()=>{if(ensureOperator())clearInterval(timer);else if(++tries>200)clearInterval(timer)},100);
+  window.SemeandoV114={get:load,set:save,apply,openOutput};
+}
+
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});
+else boot();
 })();
