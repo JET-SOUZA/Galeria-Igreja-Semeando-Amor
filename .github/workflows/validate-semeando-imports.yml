@@ -1,0 +1,31 @@
+name: Validate Semeando Memorias imports
+
+on:
+  push:
+    branches:
+      - fix/zip-icloud-import-20260829
+  workflow_dispatch:
+
+jobs:
+  webapp-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: webapp/package.json
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate deploy source
+        run: npm run check:deploy
+      - name: Test ZIP extraction
+        run: node scripts/test-zip-import.mjs
+      - name: Build Next.js
+        run: npm run build

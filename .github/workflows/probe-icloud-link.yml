@@ -1,0 +1,30 @@
+name: Probe iCloud link
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/zip-icloud-import-20260829
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Load protected iCloud test link
+        shell: bash
+        env:
+          ICLOUD_TEST_LINK: ${{ secrets.ICLOUD_TEST_LINK }}
+        run: |
+          test -n "$ICLOUD_TEST_LINK"
+          echo "::add-mask::$ICLOUD_TEST_LINK"
+          echo "ICLOUD_TEST_LINK=$ICLOUD_TEST_LINK" >> "$GITHUB_ENV"
+      - name: Probe iCloud with headless Chrome
+        run: node scripts/probe-icloud-link.mjs
