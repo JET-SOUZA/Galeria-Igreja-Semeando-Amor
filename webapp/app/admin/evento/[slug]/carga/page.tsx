@@ -9,7 +9,7 @@ type EventRow={id:string;title:string;slug:string;organization_id:string;gallery
 type ServerItem={client_key:string;status:string;error_message?:string|null;file_name:string;size_bytes:number};
 type Batch={id:string;status:string;total_files:number;completed_files:number;failed_files:number;total_bytes:number;completed_bytes:number;created_at:string};
 type StorageInfo={backend_id:string;object_prefix:string;backend:{provider:string;backend_code:string;label:string;bucket_name:string;active:boolean;status:string;message?:string|null;max_file_bytes?:number|null;capacity_bytes?:number|null;usable_capacity_bytes?:number|null};backend_used_bytes:number;backend_available_bytes:number|null};
-type R2Part={part_number:number;etag?:string;size:number};
+type MultipartPart={part_number:number;etag?:string;size:number};
 
 const CLOUDINARY_MAX=10*1024*1024;
 const PREVIEW_TARGET=Math.floor(9.4*1024*1024);
@@ -56,9 +56,9 @@ function xhrPut(url:string,blob:Blob,onProgress:(loaded:number)=>void){
     xhr.open('PUT',url,true);
     xhr.timeout=20*60*1000;
     xhr.upload.onprogress=e=>{if(e.lengthComputable)onProgress(e.loaded)};
-    xhr.onerror=()=>reject(new Error('Falha de rede ao enviar parte para o R2.'));
-    xhr.ontimeout=()=>reject(new Error('Tempo esgotado ao enviar parte para o R2.'));
-    xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve():reject(new Error(`R2 recusou a parte (${xhr.status}).`));
+    xhr.onerror=()=>reject(new Error('Falha de rede ao enviar parte para o storage externo.'));
+    xhr.ontimeout=()=>reject(new Error('Tempo esgotado ao enviar parte para o storage externo.'));
+    xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve():reject(new Error(`Storage externo recusou a parte (${xhr.status}).`));
     xhr.send(blob);
   });
 }
@@ -94,13 +94,16 @@ export default function MassUpload({params}:{params:{slug:string}}){
     return d;
   }
 
-  async function r2Api(body:any){
+  async function multipartApi(endpoint:string,body:any,label:string){
     const s=await auth();
-    const r=await fetch(`${SB}/functions/v1/r2-multipart`,{method:'POST',headers:{apikey:KEY,Authorization:`Bearer ${s.access_token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r=await fetch(`${SB}/functions/v1/${endpoint}`,{method:'POST',headers:{apikey:KEY,Authorization:`Bearer ${s.access_token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
-    if(!r.ok){const e:any=new Error(d.error||'Falha no upload multipart para o R2.');e.data=d;throw e;}
+    if(!r.ok){const e:any=new Error(d.error||`Falha no upload multipart para ${label}.`);e.data=d;throw e;}
     return d;
   }
+
+  const r2Api=(body:any)=>multipartApi('r2-multipart',body,'Cloudflare R2');
+  const s3Api=(body:any)=>multipartApi('s3-multipart',body,'Backblaze B2');
 
   async function load(batch?:string){
     setLoading(true);
@@ -139,7 +142,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
   const capacityOk=available==null||stats.total<=available;
   const fileOk=!backend?.max_file_bytes||stats.max<=backend.max_file_bytes;
   const backendOk=!!backend?.active&&!['blocked','configuration_required'].includes(backend?.status||'');
-  const providerOk=['supabase','r2'].includes(backend?.provider||'');
+  const providerOk=['supabase','r2','s3'].includes(backend?.provider||'');
   const ready=files.length>0&&capacityOk&&fileOk&&backendOk&&providerOk;
 
   function pick(e:React.ChangeEvent<HTMLInputElement>){
@@ -164,7 +167,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
     const current=batches.find(b=>b.id===batchId);
     if(current&&['preparing','uploading','partial'].includes(current.status)&&Number(current.total_files)===files.length&&Number(current.total_bytes)===stats.total)return{id:current.id,resumed:true};
     await entitlementCheck(files.length,stats.total);
-    const d=await batchApi({action:'create',event_id:event.id,total_files:files.length,total_bytes:stats.total,source_type:'local_mass',metadata:{browser:navigator.userAgent,concurrency:CONCURRENCY,storage_provider:backend?.provider||null}});
+    const d=await batchApi({action:'create',event_id:event.id,total_files:files.length,total_bytes:stats.total,source_type:'local_mass',metadata:{browser:navigator.userAgent,concurrency:CONCURRENCY,storage_provider:backend?.provider||null,storage_backend_code:backend?.backend_code||null}});
     const id=d.batch.id;
     setBatchId(id);
     setServerItems([]);
@@ -190,12 +193,12 @@ export default function MassUpload({params}:{params:{slug:string}}){
     return path;
   }
 
-  async function uploadR2Original(file:File,onPct:(n:number)=>void){
+  async function uploadMultipartOriginal(file:File,onPct:(n:number)=>void,api:(body:any)=>Promise<any>,label:string){
     if(!event)throw Error('Evento indisponível.');
-    const init=await r2Api({action:'init',event_id:event.id,file_name:file.name,size_bytes:file.size,mime_type:file.type||'application/octet-stream',client_key:keyOf(file)});
+    const init=await api({action:'init',event_id:event.id,file_name:file.name,size_bytes:file.size,mime_type:file.type||'application/octet-stream',client_key:keyOf(file)});
     const sessionId=String(init.session_id||'');
     const partSize=Math.max(5*1024*1024,Number(init.part_size||8*1024*1024));
-    const uploaded=new Map<number,R2Part>((init.uploaded_parts||[]).map((p:R2Part)=>[Number(p.part_number),p]));
+    const uploaded=new Map<number,MultipartPart>((init.uploaded_parts||[]).map((p:MultipartPart)=>[Number(p.part_number),p]));
     let completedBytes=Array.from(uploaded.values()).reduce((a,p)=>a+Number(p.size||0),0);
     onPct(Math.min(90,Math.round(completedBytes/file.size*90)));
     const totalParts=Math.ceil(file.size/partSize);
@@ -208,7 +211,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
       let sent=false,lastError:any=null;
       for(let attempt=0;attempt<PART_RETRIES&&!sent;attempt++){
         try{
-          const signed=await r2Api({action:'sign_part',session_id:sessionId,part_number:part});
+          const signed=await api({action:'sign_part',session_id:sessionId,part_number:part});
           await xhrPut(String(signed.url),blob,loaded=>onPct(Math.min(90,Math.round((completedBytes+loaded)/file.size*90))));
           sent=true;
         }catch(e:any){
@@ -216,21 +219,25 @@ export default function MassUpload({params}:{params:{slug:string}}){
           if(attempt<PART_RETRIES-1)await sleep(Math.min(15000,1000*Math.pow(2,attempt)));
         }
       }
-      if(!sent)throw lastError||new Error(`Falha ao enviar a parte ${part}.`);
+      if(!sent)throw lastError||new Error(`Falha ao enviar a parte ${part} para ${label}.`);
       completedBytes+=blob.size;
       onPct(Math.min(90,Math.round(completedBytes/file.size*90)));
     }
 
-    const complete=await r2Api({action:'complete',session_id:sessionId});
-    if(!complete.verified&&!complete.already_completed)throw Error('O R2 não confirmou a integridade do objeto concluído.');
+    const complete=await api({action:'complete',session_id:sessionId});
+    if(!complete.verified&&!complete.already_completed)throw Error(`${label} não confirmou a integridade do objeto concluído.`);
     onPct(92);
     return String(complete.object_key||init.object_key||'');
   }
+
+  const uploadR2Original=(file:File,onPct:(n:number)=>void)=>uploadMultipartOriginal(file,onPct,r2Api,'Cloudflare R2');
+  const uploadS3Original=(file:File,onPct:(n:number)=>void)=>uploadMultipartOriginal(file,onPct,s3Api,'Backblaze B2');
 
   async function uploadOriginal(file:File,onPct:(n:number)=>void){
     if(!event||!storage||!backend)throw Error('Storage não carregado.');
     if(backend.provider==='supabase')return uploadSupabaseOriginal(file,onPct);
     if(backend.provider==='r2')return uploadR2Original(file,onPct);
+    if(backend.provider==='s3')return uploadS3Original(file,onPct);
     throw Error(`Backend ${backend.provider||'desconhecido'} ainda não é suportado pelo uploader.`);
   }
 
@@ -281,7 +288,8 @@ export default function MassUpload({params}:{params:{slug:string}}){
       const currentDone=created.resumed?new Set(serverItems.filter(i=>['registered','skipped'].includes(i.status)).map(i=>i.client_key)):new Set<string>();
       const queue=working.filter(f=>!currentDone.has(keyOf(f)));
       let next=0;
-      setMsg(`Carga iniciada no ${backend?.provider==='r2'?'Cloudflare R2 multipart':'Supabase resumível'} com ${CONCURRENCY} uploads simultâneos.`);
+      const transport=backend?.provider==='r2'?'Cloudflare R2 multipart':backend?.provider==='s3'?'Backblaze B2 multipart':'Supabase resumível';
+      setMsg(`Carga iniciada no ${transport} com ${CONCURRENCY} uploads simultâneos.`);
       const worker=async()=>{
         while(true){
           if(stopRef.current)return;
@@ -313,7 +321,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
   return <main className="mass">
     <header><div><a href={`/admin/evento/${params.slug}/fotos`}>← Gerenciar fotos</a><span>CARGA MASSIVA</span><h1>{event?.title||'Evento grande'}</h1><p>Fila segura para milhares de originais, com retomada, tentativas automáticas e processamento em segundo plano.</p></div><a className="secondary" href={`/evento/${params.slug}`}>Ver galeria</a></header>
     {msg&&<div className="notice">{msg}</div>}
-    <section className="readiness"><div className="head"><div><span>PRONTIDÃO DO ARMAZENAMENTO</span><h2>{backend?.label||'Verificando storage...'}</h2></div><b className={`state ${backendOk&&providerOk?'ok':'bad'}`}>{loading?'VERIFICANDO':backendOk&&providerOk?'ATIVO':'NÃO LIBERADO'}</b></div><div className="metrics"><article><small>Backend</small><strong>{backend?.provider?.toUpperCase()||'—'}</strong></article><article><small>Disponível seguro</small><strong>{available==null?'Ilimitado/externo':bytes(available)}</strong></article><article><small>Máx. por arquivo</small><strong>{backend?.max_file_bytes?bytes(backend.max_file_bytes):'—'}</strong></article><article><small>Método</small><strong>{backend?.provider==='r2'?'MULTIPART 8 MB':backend?.provider==='supabase'?'TUS RESUMÍVEL':'—'}</strong></article></div>{backend?.message&&<p className="warning">⚠ {backend.message}</p>}</section>
+    <section className="readiness"><div className="head"><div><span>PRONTIDÃO DO ARMAZENAMENTO</span><h2>{backend?.label||'Verificando storage...'}</h2></div><b className={`state ${backendOk&&providerOk?'ok':'bad'}`}>{loading?'VERIFICANDO':backendOk&&providerOk?'ATIVO':'NÃO LIBERADO'}</b></div><div className="metrics"><article><small>Backend</small><strong>{backend?.provider?.toUpperCase()||'—'}</strong></article><article><small>Disponível seguro</small><strong>{available==null?'Ilimitado/externo':bytes(available)}</strong></article><article><small>Máx. por arquivo</small><strong>{backend?.max_file_bytes?bytes(backend.max_file_bytes):'—'}</strong></article><article><small>Método</small><strong>{backend?.provider==='r2'||backend?.provider==='s3'?'MULTIPART 8 MB':backend?.provider==='supabase'?'TUS RESUMÍVEL':'—'}</strong></article></div>{backend?.message&&<p className="warning">⚠ {backend.message}</p>}</section>
     <section className="picker"><div><span>01 • SELECIONAR FOTOS</span><h2>Escolha arquivos ou uma pasta inteira</h2><p>Para o evento principal, prefira um computador conectado por cabo ou Wi‑Fi estável. Não use um ZIP gigante.</p></div><div className="pickButtons"><label>＋ Selecionar arquivos<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff" onChange={pick}/></label><label className="folder">▣ Selecionar pasta<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff" {...({webkitdirectory:'',directory:''} as any)} onChange={pick}/></label></div></section>
     {files.length>0&&<><section className="analysis"><div className="analysisTitle"><div><span>02 • ANÁLISE DO LOTE</span><h2>{files.length.toLocaleString('pt-BR')} fotos • {bytes(stats.total)}</h2></div><b className={`state ${ready?'ok':'bad'}`}>{ready?'PRONTO PARA INICIAR':'BLOQUEADO'}</b></div><div className="checks"><article className={fileOk?'okc':'badc'}><b>{fileOk?'✓':'!'}</b><div><strong>Maior arquivo</strong><small>{bytes(stats.max)} {backend?.max_file_bytes?`de ${bytes(backend.max_file_bytes)} permitidos`:''}</small></div></article><article className={capacityOk?'okc':'badc'}><b>{capacityOk?'✓':'!'}</b><div><strong>Capacidade</strong><small>{capacityOk?'O lote cabe no backend atual.':'O lote ultrapassa a capacidade segura atual.'}</small></div></article><article className={backendOk&&providerOk?'okc':'badc'}><b>{backendOk&&providerOk?'✓':'!'}</b><div><strong>Storage</strong><small>{backendOk&&providerOk?'Backend ativo e compatível.':'Storage dedicado ainda precisa ser configurado.'}</small></div></article><article className="okc"><b>3</b><div><strong>Concorrência controlada</strong><small>Somente 3 originais simultâneos.</small></div></article></div><div className="actions"><button className="primary" disabled={!ready||running} onClick={()=>run()}>{running?'Processando...':'▶ Iniciar carga segura'}</button>{running&&<button className="secondary" onClick={pause}>Ⅱ Pausar após atuais</button>}{failures.length>0&&!running&&<button className="retry" onClick={retry}>↻ Tentar {failures.length} falha(s) novamente</button>}</div></section>
     <section className="progress"><div className="barHead"><div><span>PROGRESSO</span><b>{done.toLocaleString('pt-BR')} de {files.length.toLocaleString('pt-BR')}</b></div><strong>{pct}%</strong></div><div className="bar"><i style={{width:`${pct}%`}}/></div><div className="progressStats"><span>✓ {done} concluídas</span><span>! {failed} falhas</span><span>↻ {Object.keys(active).length} em andamento</span><span>… {Math.max(0,files.length-done-failed-Object.keys(active).length)} aguardando</span></div>{Object.entries(active).length>0&&<div className="activeList">{Object.entries(active).map(([k,a])=><div key={k}><span title={a.name}>{a.name}</span><b>{a.pct}%</b></div>)}</div>}{failures.length>0&&<details><summary>Ver falhas desta sessão ({failures.length})</summary>{failures.slice(0,50).map((x,i)=><p key={i}><b>{x.file.name}</b> — {x.error}</p>)}</details>}</section></>}
