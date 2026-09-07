@@ -2,7 +2,6 @@
 
 import {useEffect,useMemo,useRef,useState} from 'react';
 import * as tus from 'tus-js-client';
-import heic2any from 'heic2any';
 import {SB,KEY,adminHeaders,session} from '../../../../../lib/sb';
 
 type EventRow={id:string;title:string;slug:string;organization_id:string;gallery_access:string;face_search_enabled:boolean};
@@ -37,7 +36,8 @@ async function previewFile(file:File){
   if(file.size<CLOUDINARY_MAX&&!/\.(heic|heif)$/i.test(file.name)&&!/heic|heif/i.test(file.type))return file;
   let source:Blob=file;
   if(/\.(heic|heif)$/i.test(file.name)||/heic|heif/i.test(file.type)){
-    const c=await heic2any({blob:file,toType:'image/jpeg',quality:.94});
+    const mod:any=await import('heic2any');
+    const c=await mod.default({blob:file,toType:'image/jpeg',quality:.94});
     source=Array.isArray(c)?c[0]:c;
   }
   let out:Blob|null=null,maxSide=6500,q=.9;
