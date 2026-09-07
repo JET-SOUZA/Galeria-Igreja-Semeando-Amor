@@ -9,11 +9,16 @@ type ServerItem={client_key:string;status:string;error_message?:string|null;file
 type Batch={id:string;status:string;total_files:number;completed_files:number;failed_files:number;total_bytes:number;completed_bytes:number;created_at:string};
 type StorageInfo={backend_id:string;object_prefix:string;backend:{provider:string;backend_code:string;label:string;bucket_name:string;active:boolean;status:string;message?:string|null;max_file_bytes?:number|null;capacity_bytes?:number|null;usable_capacity_bytes?:number|null};backend_used_bytes:number;backend_available_bytes:number|null};
 type MultipartPart={part_number:number;etag?:string;size:number};
+type RejectedFile={name:string;reason:string};
 
-const CLOUDINARY_MAX=10*1024*1024;
-const PREVIEW_TARGET=Math.floor(9.4*1024*1024);
+const PREVIEW_TARGET=3*1024*1024;
+const PREVIEW_MAX_SIDE=3600;
 const CONCURRENCY=3;
 const PART_RETRIES=5;
+const ACCEPTED_EXT=/\.(jpe?g|png|webp|heic|heif|avif|tiff?)$/i;
+const RAW_EXT=/\.(cr2|cr3|nef|nrw|arw|dng|raf|orf|rw2|pef)$/i;
+const TIFF_EXT=/\.tiff?$/i;
+const ACCEPTED_MIME=new Set(['image/jpeg','image/png','image/webp','image/heic','image/heif','image/avif','image/tiff']);
 
 const bytes=(n:number)=>n>=1073741824?`${(n/1073741824).toFixed(2)} GB`:n>=1048576?`${(n/1048576).toFixed(1)} MB`:`${Math.round(n/1024)} KB`;
 const keyOf=(f:File)=>`${f.webkitRelativePath||f.name}::${f.size}::${f.lastModified}`;
@@ -28,25 +33,28 @@ async function canvasBlob(source:Blob,maxSide:number,quality:number){
     c.width=Math.max(1,Math.round(img.naturalWidth*scale));
     c.height=Math.max(1,Math.round(img.naturalHeight*scale));
     c.getContext('2d')!.drawImage(img,0,0,c.width,c.height);
-    return await new Promise<Blob>((ok,no)=>c.toBlob(b=>b?ok(b):no(new Error('Falha ao criar prévia.')),'image/jpeg',quality));
+    const result=await new Promise<Blob>((ok,no)=>c.toBlob(b=>b?ok(b):no(new Error('Falha ao criar prévia.')),'image/jpeg',quality));
+    c.width=1;c.height=1;
+    return result;
   }finally{URL.revokeObjectURL(url)}
 }
 
 async function previewFile(file:File){
-  if(file.size<CLOUDINARY_MAX&&!/\.(heic|heif)$/i.test(file.name)&&!/heic|heif/i.test(file.type))return file;
+  if(file.size<=PREVIEW_TARGET&&!/\.(heic|heif)$/i.test(file.name)&&!/heic|heif/i.test(file.type))return file;
+  if(TIFF_EXT.test(file.name))throw new Error(`${file.name}: TIFF acima de 3 MB deve ser exportado como JPEG antes da carga.`);
   let source:Blob=file;
   if(/\.(heic|heif)$/i.test(file.name)||/heic|heif/i.test(file.type)){
     const mod:any=await import('heic2any');
     const c=await mod.default({blob:file,toType:'image/jpeg',quality:.94});
     source=Array.isArray(c)?c[0]:c;
   }
-  let out:Blob|null=null,maxSide=6500,q=.9;
+  let out:Blob|null=null,maxSide=PREVIEW_MAX_SIDE,q=.88;
   for(let i=0;i<10;i++){
     out=await canvasBlob(source,maxSide,q);
     if(out.size<=PREVIEW_TARGET)break;
     if(q>.74)q-=.04;else maxSide=Math.round(maxSide*.84);
   }
-  if(!out||out.size>=CLOUDINARY_MAX)throw new Error('Não foi possível gerar a prévia abaixo de 10 MB.');
+  if(!out||out.size>PREVIEW_TARGET)throw new Error('Não foi possível gerar a prévia otimizada abaixo de 3 MB.');
   return new File([out],file.name.replace(/\.[^.]+$/,'.jpg'),{type:'image/jpeg'});
 }
 
@@ -77,8 +85,11 @@ export default function MassUpload({params}:{params:{slug:string}}){
   const[failed,setFailed]=useState(0);
   const[active,setActive]=useState<Record<string,{name:string;pct:number}>>({});
   const[failures,setFailures]=useState<{file:File;error:string}[]>([]);
+  const[rejected,setRejected]=useState<RejectedFile[]>([]);
+  const[ignored,setIgnored]=useState(0);
   const[batchId,setBatchId]=useState('');
   const stopRef=useRef(false);
+  const previewQueueRef=useRef<Promise<void>>(Promise.resolve());
 
   async function auth(){
     const s=await session();
@@ -105,6 +116,14 @@ export default function MassUpload({params}:{params:{slug:string}}){
   const r2Api=(body:any)=>multipartApi('r2-multipart',body,'Cloudflare R2');
   const s3Api=(body:any)=>multipartApi('s3-multipart',body,'Backblaze B2');
 
+  async function preparePreview(file:File){
+    const previous=previewQueueRef.current;
+    let release=()=>{};
+    previewQueueRef.current=new Promise<void>(resolve=>{release=()=>resolve();});
+    await previous;
+    try{return await previewFile(file)}finally{release()}
+  }
+
   async function load(batch?:string){
     setLoading(true);
     try{
@@ -128,13 +147,19 @@ export default function MassUpload({params}:{params:{slug:string}}){
   }
 
   useEffect(()=>{load()},[params.slug]);
+  useEffect(()=>{
+    if(!running)return;
+    const warn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue='';};
+    window.addEventListener('beforeunload',warn);
+    return()=>window.removeEventListener('beforeunload',warn);
+  },[running]);
 
   const stats=useMemo(()=>{
     const total=files.reduce((a,f)=>a+f.size,0);
     const max=files.reduce((a,f)=>Math.max(a,f.size),0);
     const completed=new Set(serverItems.filter(i=>['registered','skipped'].includes(i.status)).map(i=>i.client_key));
     const remaining=files.filter(f=>!completed.has(keyOf(f)));
-    return{total,max,completed,remaining};
+    return{total,max,completed,remaining,previewCap:files.length*PREVIEW_TARGET};
   },[files,serverItems]);
 
   const backend=storage?.backend;
@@ -143,13 +168,32 @@ export default function MassUpload({params}:{params:{slug:string}}){
   const fileOk=!backend?.max_file_bytes||stats.max<=backend.max_file_bytes;
   const backendOk=!!backend?.active&&!['blocked','configuration_required'].includes(backend?.status||'');
   const providerOk=['supabase','r2','s3'].includes(backend?.provider||'');
-  const ready=files.length>0&&capacityOk&&fileOk&&backendOk&&providerOk;
+  const ready=files.length>0&&rejected.length===0&&capacityOk&&fileOk&&backendOk&&providerOk;
 
   function pick(e:React.ChangeEvent<HTMLInputElement>){
-    const all=Array.from(e.target.files||[]).filter(f=>/^image\//.test(f.type)||/\.(jpe?g|png|webp|heic|heif|avif|tiff?)$/i.test(f.name));
-    setFiles(all);
+    const selected=Array.from(e.target.files||[]);
+    const blocked:RejectedFile[]=[];
+    const accepted:File[]=[];
+    let nonImages=0;
+    for(const file of selected){
+      const mime=file.type.toLowerCase();
+      if(RAW_EXT.test(file.name)){blocked.push({name:file.webkitRelativePath||file.name,reason:'arquivo RAW; exporte uma cópia JPEG em qualidade máxima'});continue;}
+      if(ACCEPTED_EXT.test(file.name)||ACCEPTED_MIME.has(mime)){
+        if(TIFF_EXT.test(file.name)&&file.size>PREVIEW_TARGET){blocked.push({name:file.webkitRelativePath||file.name,reason:'TIFF acima de 3 MB; exporte como JPEG'});continue;}
+        accepted.push(file);continue;
+      }
+      if(mime.startsWith('image/'))blocked.push({name:file.webkitRelativePath||file.name,reason:'formato de imagem ainda não suportado'});
+      else nonImages++;
+    }
+    setFiles(accepted);
+    setRejected(blocked);
+    setIgnored(nonImages);
     setFailures([]);
-    setMsg(all.length?`${all.length.toLocaleString('pt-BR')} imagens selecionadas. Revise a capacidade antes de iniciar.`:'');
+    const notes=[];
+    if(accepted.length)notes.push(`${accepted.length.toLocaleString('pt-BR')} imagens compatíveis selecionadas.`);
+    if(blocked.length)notes.push(`${blocked.length.toLocaleString('pt-BR')} arquivo(s) precisa(m) ser convertido(s) antes da carga.`);
+    if(nonImages)notes.push(`${nonImages.toLocaleString('pt-BR')} arquivo(s) que não são imagem foram ignorados.`);
+    setMsg(notes.join(' ')||'Nenhuma imagem compatível foi selecionada.');
     setPaused(false);
     stopRef.current=false;
   }
@@ -249,7 +293,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
     try{
       const path=await uploadOriginal(file,pct=>setActive(v=>({...v,[key]:{name:file.name,pct}})));
       setActive(v=>({...v,[key]:{name:file.name,pct:94}}));
-      const pv=await previewFile(file);
+      const pv=await preparePreview(file);
       const fd=new FormData();
       fd.append('file',pv);
       fd.append('upload_preset','semeando_memorias');
@@ -322,10 +366,10 @@ export default function MassUpload({params}:{params:{slug:string}}){
     <header><div><a href={`/admin/evento/${params.slug}/fotos`}>← Gerenciar fotos</a><span>CARGA MASSIVA</span><h1>{event?.title||'Evento grande'}</h1><p>Fila segura para milhares de originais, com retomada, tentativas automáticas e processamento em segundo plano.</p></div><a className="secondary" href={`/evento/${params.slug}`}>Ver galeria</a></header>
     {msg&&<div className="notice">{msg}</div>}
     <section className="readiness"><div className="head"><div><span>PRONTIDÃO DO ARMAZENAMENTO</span><h2>{backend?.label||'Verificando storage...'}</h2></div><b className={`state ${backendOk&&providerOk?'ok':'bad'}`}>{loading?'VERIFICANDO':backendOk&&providerOk?'ATIVO':'NÃO LIBERADO'}</b></div><div className="metrics"><article><small>Backend</small><strong>{backend?.provider?.toUpperCase()||'—'}</strong></article><article><small>Disponível seguro</small><strong>{available==null?'Ilimitado/externo':bytes(available)}</strong></article><article><small>Máx. por arquivo</small><strong>{backend?.max_file_bytes?bytes(backend.max_file_bytes):'—'}</strong></article><article><small>Método</small><strong>{backend?.provider==='r2'||backend?.provider==='s3'?'MULTIPART 8 MB':backend?.provider==='supabase'?'TUS RESUMÍVEL':'—'}</strong></article></div>{backend?.message&&<p className="warning">⚠ {backend.message}</p>}</section>
-    <section className="picker"><div><span>01 • SELECIONAR FOTOS</span><h2>Escolha arquivos ou uma pasta inteira</h2><p>Para o evento principal, prefira um computador conectado por cabo ou Wi‑Fi estável. Não use um ZIP gigante.</p></div><div className="pickButtons"><label>＋ Selecionar arquivos<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff" onChange={pick}/></label><label className="folder">▣ Selecionar pasta<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff" {...({webkitdirectory:'',directory:''} as any)} onChange={pick}/></label></div></section>
-    {files.length>0&&<><section className="analysis"><div className="analysisTitle"><div><span>02 • ANÁLISE DO LOTE</span><h2>{files.length.toLocaleString('pt-BR')} fotos • {bytes(stats.total)}</h2></div><b className={`state ${ready?'ok':'bad'}`}>{ready?'PRONTO PARA INICIAR':'BLOQUEADO'}</b></div><div className="checks"><article className={fileOk?'okc':'badc'}><b>{fileOk?'✓':'!'}</b><div><strong>Maior arquivo</strong><small>{bytes(stats.max)} {backend?.max_file_bytes?`de ${bytes(backend.max_file_bytes)} permitidos`:''}</small></div></article><article className={capacityOk?'okc':'badc'}><b>{capacityOk?'✓':'!'}</b><div><strong>Capacidade</strong><small>{capacityOk?'O lote cabe no backend atual.':'O lote ultrapassa a capacidade segura atual.'}</small></div></article><article className={backendOk&&providerOk?'okc':'badc'}><b>{backendOk&&providerOk?'✓':'!'}</b><div><strong>Storage</strong><small>{backendOk&&providerOk?'Backend ativo e compatível.':'Storage dedicado ainda precisa ser configurado.'}</small></div></article><article className="okc"><b>3</b><div><strong>Concorrência controlada</strong><small>Somente 3 originais simultâneos.</small></div></article></div><div className="actions"><button className="primary" disabled={!ready||running} onClick={()=>run()}>{running?'Processando...':'▶ Iniciar carga segura'}</button>{running&&<button className="secondary" onClick={pause}>Ⅱ Pausar após atuais</button>}{failures.length>0&&!running&&<button className="retry" onClick={retry}>↻ Tentar {failures.length} falha(s) novamente</button>}</div></section>
+    <section className="picker"><div><span>01 • SELECIONAR FOTOS</span><h2>Escolha arquivos ou uma pasta inteira</h2><p>Use um computador com internet estável. JPEG, PNG, WebP, AVIF e HEIC são aceitos; arquivos RAW de câmera devem ser exportados em JPEG de qualidade máxima.</p></div><div className="pickButtons"><label>＋ Selecionar arquivos<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" onChange={pick}/></label><label className="folder">▣ Selecionar pasta<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" {...({webkitdirectory:'',directory:''} as any)} onChange={pick}/></label></div></section>
+    {(files.length>0||rejected.length>0)&&<><section className="analysis"><div className="analysisTitle"><div><span>02 • ANÁLISE DO LOTE</span><h2>{files.length.toLocaleString('pt-BR')} fotos • {bytes(stats.total)}</h2><small>Originais preservados sem compressão • prévias somadas de até {bytes(stats.previewCap)}</small></div><b className={`state ${ready?'ok':'bad'}`}>{ready?'PRONTO PARA INICIAR':'BLOQUEADO'}</b></div><div className="checks"><article className={fileOk?'okc':'badc'}><b>{fileOk?'✓':'!'}</b><div><strong>Maior arquivo</strong><small>{bytes(stats.max)} {backend?.max_file_bytes?`de ${bytes(backend.max_file_bytes)} permitidos`:''}</small></div></article><article className={capacityOk?'okc':'badc'}><b>{capacityOk?'✓':'!'}</b><div><strong>Capacidade</strong><small>{capacityOk?'O lote cabe no backend atual.':'O lote ultrapassa a capacidade segura atual.'}</small></div></article><article className={backendOk&&providerOk?'okc':'badc'}><b>{backendOk&&providerOk?'✓':'!'}</b><div><strong>Storage</strong><small>{backendOk&&providerOk?'Backend ativo e compatível.':'Storage dedicado ainda precisa ser configurado.'}</small></div></article><article className={rejected.length===0?'okc':'badc'}><b>{rejected.length===0?'✓':'!'}</b><div><strong>Formatos</strong><small>{rejected.length===0?'Todas as fotos são compatíveis.':`${rejected.length} arquivo(s) exige(m) conversão.`}</small></div></article><article className="okc"><b>3</b><div><strong>Concorrência controlada</strong><small>3 originais e 1 prévia pesada por vez.</small></div></article></div>{rejected.length>0&&<div className="rejected"><b>Converta estes arquivos antes de iniciar:</b>{rejected.slice(0,20).map((x,i)=><p key={`${x.name}-${i}`}><strong>{x.name}</strong> — {x.reason}</p>)}{rejected.length>20&&<p>… e mais {rejected.length-20} arquivo(s).</p>}</div>}{ignored>0&&<p className="ignored">{ignored.toLocaleString('pt-BR')} arquivo(s) que não são imagem foram ignorados.</p>}<div className="actions"><button className="primary" disabled={!ready||running} onClick={()=>run()}>{running?'Processando...':'▶ Iniciar carga segura'}</button>{running&&<button className="secondary" onClick={pause}>Ⅱ Pausar após atuais</button>}{failures.length>0&&!running&&<button className="retry" onClick={retry}>↻ Tentar {failures.length} falha(s) novamente</button>}</div></section>
     <section className="progress"><div className="barHead"><div><span>PROGRESSO</span><b>{done.toLocaleString('pt-BR')} de {files.length.toLocaleString('pt-BR')}</b></div><strong>{pct}%</strong></div><div className="bar"><i style={{width:`${pct}%`}}/></div><div className="progressStats"><span>✓ {done} concluídas</span><span>! {failed} falhas</span><span>↻ {Object.keys(active).length} em andamento</span><span>… {Math.max(0,files.length-done-failed-Object.keys(active).length)} aguardando</span></div>{Object.entries(active).length>0&&<div className="activeList">{Object.entries(active).map(([k,a])=><div key={k}><span title={a.name}>{a.name}</span><b>{a.pct}%</b></div>)}</div>}{failures.length>0&&<details><summary>Ver falhas desta sessão ({failures.length})</summary>{failures.slice(0,50).map((x,i)=><p key={i}><b>{x.file.name}</b> — {x.error}</p>)}</details>}</section></>}
     <section className="history"><div><span>ÚLTIMOS LOTES</span><h2>Histórico do evento</h2></div>{batches.length?<div className="batchList">{batches.map(b=><button key={b.id} onClick={()=>load(b.id)}><span>{new Date(b.created_at).toLocaleString('pt-BR')}</span><b>{b.completed_files}/{b.total_files}</b><em className={b.status}>{b.status}</em><small>{bytes(Number(b.total_bytes||0))}</small></button>)}</div>:<p>Nenhum lote registrado ainda.</p>}</section>
-    <style jsx>{`.mass{max-width:1180px;margin:auto;padding:90px 18px 60px;color:#f6f7f9}.mass>header{display:flex;justify-content:space-between;gap:18px;align-items:end}.mass>header a{color:#a2a9b3;text-decoration:none;font-weight:800}.mass>header span,.readiness span,.picker span,.analysis span,.progress span,.history span{display:block;color:#ff9250;font-size:10px;letter-spacing:.15em;font-weight:950;margin-top:10px}.mass h1{font-size:clamp(34px,5vw,56px);margin:7px 0}.mass h2{margin:5px 0}.mass header p,.picker p,.warning,.history p{color:#9ca3ad;line-height:1.55}.notice{margin:16px 0;background:#24170f;border:1px solid #60391f;border-radius:13px;padding:12px}.secondary,.primary,.retry,.pickButtons label{border:0;border-radius:11px;padding:11px 14px;background:#282e36;color:#fff;text-decoration:none;font-weight:900;cursor:pointer}.readiness,.picker,.analysis,.progress,.history{background:#12161b;border:1px solid #303740;border-radius:20px;padding:18px;margin-top:15px}.head,.analysisTitle,.barHead,.picker,.actions{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.state{font-size:9px;padding:8px 10px;border-radius:999px}.state.ok{background:#16372a;color:#7fe3b2;border:1px solid #276046}.state.bad{background:#351d18;color:#ff9b86;border:1px solid #6b352a}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}.metrics article{background:#0c0f13;border:1px solid #292f37;border-radius:13px;padding:12px;display:grid}.metrics small{color:#838b96}.metrics strong{margin-top:4px}.warning{background:#251a12;padding:10px;border-radius:10px}.pickButtons{display:flex;gap:8px;flex-wrap:wrap}.pickButtons label{background:#ff7417;color:#101114}.pickButtons .folder{background:#2a3038;color:#fff}.checks{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}.checks article{display:flex;align-items:center;gap:9px;border:1px solid #303740;background:#0e1115;border-radius:13px;padding:11px}.checks article>b{width:29px;height:29px;border-radius:9px;display:grid;place-items:center;background:#222831}.checks article div{display:grid}.checks small{color:#8b929c;font-size:9px}.checks .okc>b{color:#70d9a8}.checks .badc{border-color:#773b30}.checks .badc>b{color:#ff8872}.actions{justify-content:flex-start}.actions .primary{background:#ff7417;color:#111}.actions button:disabled{opacity:.45;cursor:not-allowed}.retry{background:#855225}.barHead{align-items:end}.barHead div{display:grid}.barHead strong{font-size:28px}.bar{height:12px;border-radius:999px;background:#292e35;overflow:hidden;margin:10px 0}.bar i{display:block;height:100%;background:#ff7417;transition:width .2s}.progressStats{display:flex;gap:14px;flex-wrap:wrap;color:#a7aeb7;font-size:10px}.activeList{display:grid;gap:5px;margin-top:12px}.activeList div{display:flex;justify-content:space-between;gap:10px;background:#0c0f13;padding:8px 10px;border-radius:9px}.activeList span{margin:0;color:#c8ccd2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0;text-transform:none}.activeList b{color:#ff9855}.progress details{margin-top:12px;color:#b5bbc4}.progress details p{font-size:10px}.batchList{display:grid;gap:6px;margin-top:12px}.batchList button{display:grid;grid-template-columns:1.6fr .8fr .8fr .8fr;gap:8px;align-items:center;text-align:left;background:#0d1014;border:1px solid #2d333b;color:#fff;border-radius:10px;padding:10px}.batchList span{margin:0;color:#a7adb6;letter-spacing:0;font-size:9px}.batchList em{font-style:normal;font-size:9px;color:#ff9b61}.batchList small{text-align:right;color:#8e959f}@media(max-width:760px){.mass{padding:82px 11px 45px}.mass>header{display:grid}.metrics,.checks{grid-template-columns:1fr 1fr}.picker{display:grid}.pickButtons{display:grid;grid-template-columns:1fr 1fr}.pickButtons label{text-align:center;font-size:10px}.batchList button{grid-template-columns:1fr 1fr}.batchList small{text-align:left}.analysisTitle{align-items:flex-start}}`}</style>
+    <style jsx>{`.mass{max-width:1180px;margin:auto;padding:90px 18px 60px;color:#f6f7f9}.mass>header{display:flex;justify-content:space-between;gap:18px;align-items:end}.mass>header a{color:#a2a9b3;text-decoration:none;font-weight:800}.mass>header span,.readiness span,.picker span,.analysis span,.progress span,.history span{display:block;color:#ff9250;font-size:10px;letter-spacing:.15em;font-weight:950;margin-top:10px}.mass h1{font-size:clamp(34px,5vw,56px);margin:7px 0}.mass h2{margin:5px 0}.mass header p,.picker p,.warning,.history p{color:#9ca3ad;line-height:1.55}.notice{margin:16px 0;background:#24170f;border:1px solid #60391f;border-radius:13px;padding:12px}.secondary,.primary,.retry,.pickButtons label{border:0;border-radius:11px;padding:11px 14px;background:#282e36;color:#fff;text-decoration:none;font-weight:900;cursor:pointer}.readiness,.picker,.analysis,.progress,.history{background:#12161b;border:1px solid #303740;border-radius:20px;padding:18px;margin-top:15px}.head,.analysisTitle,.barHead,.picker,.actions{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.analysisTitle small{color:#8f969f}.state{font-size:9px;padding:8px 10px;border-radius:999px}.state.ok{background:#16372a;color:#7fe3b2;border:1px solid #276046}.state.bad{background:#351d18;color:#ff9b86;border:1px solid #6b352a}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}.metrics article{background:#0c0f13;border:1px solid #292f37;border-radius:13px;padding:12px;display:grid}.metrics small{color:#838b96}.metrics strong{margin-top:4px}.warning{background:#251a12;padding:10px;border-radius:10px}.pickButtons{display:flex;gap:8px;flex-wrap:wrap}.pickButtons label{background:#ff7417;color:#101114}.pickButtons .folder{background:#2a3038;color:#fff}.checks{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}.checks article{display:flex;align-items:center;gap:9px;border:1px solid #303740;background:#0e1115;border-radius:13px;padding:11px}.checks article>b{width:29px;height:29px;border-radius:9px;display:grid;place-items:center;background:#222831;flex:none}.checks article div{display:grid}.checks small{color:#8b929c;font-size:9px}.checks .okc>b{color:#70d9a8}.checks .badc{border-color:#773b30}.checks .badc>b{color:#ff8872}.rejected{background:#2b1713;border:1px solid #75382d;color:#ffc2b6;border-radius:12px;padding:11px;margin-bottom:12px}.rejected>p{font-size:10px;margin:6px 0;overflow-wrap:anywhere}.ignored{color:#aeb4bc;font-size:10px}.actions{justify-content:flex-start}.actions .primary{background:#ff7417;color:#111}.actions button:disabled{opacity:.45;cursor:not-allowed}.retry{background:#855225}.barHead{align-items:end}.barHead div{display:grid}.barHead strong{font-size:28px}.bar{height:12px;border-radius:999px;background:#292e35;overflow:hidden;margin:10px 0}.bar i{display:block;height:100%;background:#ff7417;transition:width .2s}.progressStats{display:flex;gap:14px;flex-wrap:wrap;color:#a7aeb7;font-size:10px}.activeList{display:grid;gap:5px;margin-top:12px}.activeList div{display:flex;justify-content:space-between;gap:10px;background:#0c0f13;padding:8px 10px;border-radius:9px}.activeList span{margin:0;color:#c8ccd2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0;text-transform:none}.activeList b{color:#ff9855}.progress details{margin-top:12px;color:#b5bbc4}.progress details p{font-size:10px}.batchList{display:grid;gap:6px;margin-top:12px}.batchList button{display:grid;grid-template-columns:1.6fr .8fr .8fr .8fr;gap:8px;align-items:center;text-align:left;background:#0d1014;border:1px solid #2d333b;color:#fff;border-radius:10px;padding:10px}.batchList span{margin:0;color:#a7adb6;letter-spacing:0;font-size:9px}.batchList em{font-style:normal;font-size:9px;color:#ff9b61}.batchList small{text-align:right;color:#8e959f}@media(max-width:900px){.checks{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.mass{padding:82px 11px 45px}.mass>header{display:grid}.metrics{grid-template-columns:1fr 1fr}.picker{display:grid}.pickButtons{display:grid;grid-template-columns:1fr 1fr}.pickButtons label{text-align:center;font-size:10px}.batchList button{grid-template-columns:1fr 1fr}.batchList small{text-align:left}.analysisTitle{align-items:flex-start}}`}</style>
   </main>;
 }
