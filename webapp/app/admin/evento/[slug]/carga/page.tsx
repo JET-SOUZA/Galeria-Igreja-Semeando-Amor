@@ -45,9 +45,14 @@ async function previewFile(file:File){
   if(TIFF_EXT.test(file.name))throw new Error(`${file.name}: TIFF acima de 3 MB deve ser exportado como JPEG antes da carga.`);
   let source:Blob=file;
   if(/\.(heic|heif)$/i.test(file.name)||/heic|heif/i.test(file.type)){
-    const mod:any=await import('heic2any');
-    const c=await mod.default({blob:file,toType:'image/jpeg',quality:.94});
-    source=Array.isArray(c)?c[0]:c;
+    try{
+      // Safari/iOS decodes many camera HEIC variants natively and preserves
+      // compatibility with formats that older libheif builds reject.
+      source=await canvasBlob(file,PREVIEW_MAX_SIDE,.94);
+    }catch{
+      const mod:any=await import('heic-to');
+      source=await mod.heicTo({blob:file,type:'image/jpeg',quality:.94});
+    }
   }
   let out:Blob|null=null,maxSide=PREVIEW_MAX_SIDE,q=.88;
   for(let i=0;i<10;i++){
@@ -252,6 +257,10 @@ export default function MassUpload({params}:{params:{slug:string}}){
   async function uploadMultipartOriginal(file:File,onPct:(n:number)=>void,api:(body:any)=>Promise<any>,label:string){
     if(!event)throw Error('Evento indisponível.');
     const init=await api({action:'init',event_id:event.id,file_name:file.name,size_bytes:file.size,mime_type:file.type||'application/octet-stream',client_key:keyOf(file)});
+    if(init.already_completed){
+      onPct(92);
+      return String(init.object_key||'');
+    }
     const sessionId=String(init.session_id||'');
     const partSize=Math.max(5*1024*1024,Number(init.part_size||8*1024*1024));
     const uploaded=new Map<number,MultipartPart>((init.uploaded_parts||[]).map((p:MultipartPart)=>[Number(p.part_number),p]));
