@@ -102,11 +102,13 @@ async function reusableSession(c:any,eventId:string,clientKey:string,size:number
     .eq('provider','r2')
     .eq('client_key',clientKey)
     .eq('user_id',c.user.id)
-    .in('status',['initiated','uploading'])
-    .gt('expires_at',now)
+    .in('status',['initiated','uploading','completed'])
     .order('created_at',{ascending:false})
     .limit(3);
-  return (rows||[]).find((x:any)=>Number(x.size_bytes||0)===size)||null;
+  return (rows||[]).find((x:any)=>
+    Number(x.size_bytes||0)===size&&
+    (x.status==='completed'||String(x.expires_at||'')>now)
+  )||null;
 }
 
 Deno.serve(async req=>{
@@ -137,12 +139,20 @@ Deno.serve(async req=>{
         const existing=await reusableSession(c,eventId,clientKey,size);
         if(existing){
           try{
-            const uploaded=await listParts(cli,existing);
-            await c.admin.from('storage_upload_sessions').update({status:'uploading',updated_at:new Date().toISOString()}).eq('id',existing.id);
-            return j({ok:true,resumed:true,session_id:existing.id,upload_id:existing.provider_upload_id,object_key:existing.object_key,bucket_name:existing.bucket_name,part_size:PART_SIZE,uploaded_parts:uploaded});
+            if(existing.status==='completed'){
+              const head=await cli.send(new HeadObjectCommand({Bucket:existing.bucket_name,Key:existing.object_key}));
+              if(Number(head.ContentLength||0)===size){
+                return j({ok:true,resumed:true,already_completed:true,session_id:existing.id,object_key:existing.object_key,bucket_name:existing.bucket_name,part_size:PART_SIZE,uploaded_parts:[]});
+              }
+              await c.admin.from('storage_upload_sessions').update({status:'verification_failed',updated_at:new Date().toISOString()}).eq('id',existing.id);
+            }else{
+              const uploaded=await listParts(cli,existing);
+              await c.admin.from('storage_upload_sessions').update({status:'uploading',updated_at:new Date().toISOString()}).eq('id',existing.id);
+              return j({ok:true,resumed:true,session_id:existing.id,upload_id:existing.provider_upload_id,object_key:existing.object_key,bucket_name:existing.bucket_name,part_size:PART_SIZE,uploaded_parts:uploaded});
+            }
           }catch(err:any){
             const m=String(err?.name||err?.message||'');
-            if(!/NoSuchUpload|InvalidArgument|NotFound/i.test(m))throw err;
+            if(!/NoSuchUpload|NoSuchKey|InvalidArgument|NotFound/i.test(m))throw err;
             await c.admin.from('storage_upload_sessions').update({status:'expired',updated_at:new Date().toISOString()}).eq('id',existing.id);
           }
         }
