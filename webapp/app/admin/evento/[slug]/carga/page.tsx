@@ -352,7 +352,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
         setMsg(`Testando o primeiro arquivo no ${transport} antes de liberar o restante do lote...`);
         const first=queue.shift()!;
         const result=await processOne(first,created.id);
-        if(!result.ok){
+        if(result.ok===false){
           setMsg(`Teste inicial falhou e o restante do lote não foi iniciado. ${result.error}`);
           await load(created.id);
           return;
