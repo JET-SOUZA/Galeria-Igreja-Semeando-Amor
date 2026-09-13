@@ -187,7 +187,10 @@ Deno.serve(async request=>{
           amount,
           platform_fee_amount:0,
           organization_net_amount:amount,
-          payment_method:'PIX',
+          // Let the payer choose among the payment methods enabled in Asaas.
+          // A PIX-only invoice can become unpayable when PIX is unavailable
+          // for the connected account, even though the charge is created.
+          payment_method:'UNDEFINED',
           items,
           purpose:'event_purchase',
           metadata:{public_token_hash:tokenHash,event_slug:slug},
@@ -204,7 +207,7 @@ Deno.serve(async request=>{
           method:'POST',
           body:JSON.stringify({
             customer,
-            billingType:'PIX',
+            billingType:'UNDEFINED',
             value:amount,
             dueDate:due.toISOString().slice(0,10),
             description:`${ids.length} foto(s) - ${event.title}`,
