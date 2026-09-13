@@ -1,0 +1,38 @@
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  padding: 5px;
+  background: #09090c;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+}
+
+.tabs button {
+  padding: 11px 9px;
+  background: transparent;
+  color: #92929c;
+  border: 1px solid transparent;
+}
+
+.tabs button.active {
+  background: #25252c;
+  color: #fff;
+  border-color: #3a3a43;
+}
+
+.recoveryFields {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #0c0c0f;
+}
+
+@media (max-width: 420px) {
+  .tabs button {
+    padding-inline: 6px;
+    font-size: 13px;
+  }
+}

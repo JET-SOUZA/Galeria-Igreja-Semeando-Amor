@@ -10,7 +10,7 @@ const cors = {
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
-  headers: { ...cors, 'Content-Type': 'application/json' },
+  headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
 });
 const DDDS = new Set(['11','12','13','14','15','16','17','18','19','21','22','24','27','28','31','32','33','34','35','37','38','41','42','43','44','45','46','47','48','49','51','53','54','55','61','62','63','64','65','66','67','68','69','71','73','74','75','77','79','81','82','83','84','85','86','87','88','89','91','92','93','94','95','96','97','98','99']);
 
@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     const admin = createClient(SB, SERVICE, { auth: { persistSession: false, autoRefreshToken: false } });
+    const action = String(body.action || 'register');
     let organizationId = String(body.organization_id || '');
     let sourceEventId = String(body.source_event_id || body.event_id || '').trim() || null;
     const eventSlug = String(body.event_slug || '').trim();
@@ -98,6 +99,74 @@ Deno.serve(async (req) => {
       organizationId = organization?.id || '';
     }
     if (!organizationId) return json({ error: 'Organização não encontrada.' }, 400);
+
+    if (action === 'recover_access') {
+      const cpfRaw = String(body.cpf || '').trim();
+      const whatsappRaw = String(body.whatsapp || '').trim();
+      const birthDate = String(body.birth_date || '').trim();
+      const cpf = digits(cpfRaw);
+      const whatsapp = canonicalPhone(whatsappRaw);
+
+      if (!sourceEventId) return json({
+        error: 'Abra o evento desejado para recuperar seu acesso.',
+        code: 'RECOVERY_EVENT_REQUIRED',
+      }, 400);
+      if (!validCPF(cpfRaw)) return json({ error: 'Informe um CPF válido.', code: 'INVALID_CPF' }, 400);
+      if (!validPhone(whatsappRaw)) return json({ error: 'Informe um WhatsApp brasileiro válido com DDD.', code: 'INVALID_WHATSAPP' }, 400);
+      if (!validDate(birthDate)) return json({ error: 'Informe uma data de nascimento válida.', code: 'INVALID_BIRTH_DATE' }, 400);
+
+      const { data: candidates, error: candidateError } = await admin
+        .from('visitors')
+        .select('id,organization_id,full_name,email,cpf,whatsapp,birth_date,marketing_consent')
+        .eq('cpf', cpf)
+        .eq('whatsapp', whatsapp)
+        .eq('birth_date', birthDate)
+        .limit(5);
+      if (candidateError) throw candidateError;
+
+      const candidateIds = (candidates || []).map((visitor: any) => visitor.id);
+      let linkedIds = new Set<string>();
+      if (candidateIds.length) {
+        const { data: links, error: linksError } = await admin
+          .from('event_visitors')
+          .select('visitor_id')
+          .eq('event_id', sourceEventId)
+          .in('visitor_id', candidateIds);
+        if (linksError) throw linksError;
+        linkedIds = new Set((links || []).map((link: any) => String(link.visitor_id)));
+      }
+
+      // Prioriza quem já pertence ao evento. A segunda opção atende visitantes
+      // cadastrados na organização antes de serem associados a este evento.
+      const visitor = (candidates || []).find((item: any) => linkedIds.has(item.id))
+        || (candidates || []).find((item: any) => item.organization_id === organizationId)
+        || null;
+      if (!visitor) return json({
+        error: 'Não encontramos um cadastro com esses dados. Confira as informações ou crie um novo cadastro.',
+        code: 'VISITOR_ACCESS_NOT_FOUND',
+      }, 401);
+
+      const { error: linkError } = await admin
+        .from('event_visitors')
+        .upsert(
+          { event_id: sourceEventId, visitor_id: visitor.id },
+          { onConflict: 'event_id,visitor_id', ignoreDuplicates: true },
+        );
+      if (linkError) throw linkError;
+
+      return json({
+        ok: true,
+        resumed: true,
+        message: 'Acesso recuperado. Voltando para suas fotos.',
+        visitor: {
+          id: visitor.id,
+          organization_id: visitor.organization_id,
+          full_name: visitor.full_name,
+          marketing_consent: visitor.marketing_consent,
+        },
+      });
+    }
+    if (action !== 'register') return json({ error: 'Ação inválida.' }, 400);
 
     const { data: fields, error: fieldsError } = await admin.from('registration_fields').select('*').eq('organization_id', organizationId).eq('is_enabled', true).order('sort_order');
     if (fieldsError) throw fieldsError;
