@@ -86,20 +86,28 @@ Deno.serve(async request=>{
       if(!visitorId)return j({error:'VISITOR_REQUIRED'},400);
       if(!ids.length)return j({error:'EMPTY_CART'},400);
 
-      const {data:eventVisitor}=await admin
-        .from('event_visitors')
-        .select('visitor_id')
-        .eq('event_id',event.id)
-        .eq('visitor_id',visitorId)
-        .maybeSingle();
-      if(!eventVisitor)return j({error:'VISITOR_EVENT_ACCESS_REQUIRED'},403);
-
-      const {data:visitor}=await admin
+      const {data:visitor,error:visitorError}=await admin
         .from('visitors')
         .select('id,full_name,email,cpf,whatsapp')
         .eq('id',visitorId)
         .maybeSingle();
-      if(!visitor)return j({error:'VISITOR_NOT_FOUND'},404);
+      if(visitorError)throw visitorError;
+      if(!visitor)return j({
+        error:'VISITOR_SESSION_EXPIRED',
+        code:'VISITOR_SESSION_EXPIRED',
+        message:'Seu cadastro salvo neste navegador expirou. Confirme seus dados novamente para continuar; o carrinho será preservado.',
+      },401);
+
+      // O identificador local do visitante é validado acima. O vínculo pode ter
+      // faltado em sessões antigas porque a página enviava a gravação sem
+      // aguardar a resposta. O servidor repara esse estado de forma idempotente.
+      const {error:eventVisitorError}=await admin
+        .from('event_visitors')
+        .upsert(
+          {event_id:event.id,visitor_id:visitorId},
+          {onConflict:'event_id,visitor_id',ignoreDuplicates:true},
+        );
+      if(eventVisitorError)throw eventVisitorError;
 
       const {data:photos}=await admin
         .from('photos')

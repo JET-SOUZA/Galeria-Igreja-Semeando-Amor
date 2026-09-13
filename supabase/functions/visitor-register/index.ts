@@ -65,6 +65,34 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const admin = createClient(SB, SERVICE, { auth: { persistSession: false, autoRefreshToken: false } });
     let organizationId = String(body.organization_id || '');
+    let sourceEventId = String(body.source_event_id || body.event_id || '').trim() || null;
+    const eventSlug = String(body.event_slug || '').trim();
+    let sourceEvent: any = null;
+    if (eventSlug) {
+      const { data: event, error: eventError } = await admin
+        .from('events')
+        .select('id,organization_id,title')
+        .eq('slug', eventSlug)
+        .eq('status', 'published')
+        .maybeSingle();
+      if (eventError) throw eventError;
+      if (!event) return json({ error: 'Evento não encontrado.' }, 404);
+      sourceEvent = event;
+    } else if (sourceEventId) {
+      const { data: event, error: eventError } = await admin
+        .from('events')
+        .select('id,organization_id,title')
+        .eq('id', sourceEventId)
+        .eq('status', 'published')
+        .maybeSingle();
+      if (eventError) throw eventError;
+      if (!event) return json({ error: 'Evento não encontrado.' }, 404);
+      sourceEvent = event;
+    }
+    if (sourceEvent) {
+      organizationId = sourceEvent.organization_id;
+      sourceEventId = sourceEvent.id;
+    }
     if (!organizationId) {
       const { data: organization } = await admin.from('organizations').select('id').order('created_at', { ascending: true }).limit(1).maybeSingle();
       organizationId = organization?.id || '';
@@ -96,21 +124,48 @@ Deno.serve(async (req) => {
     if (cpfRaw && !validCPF(cpfRaw)) return json({ error: 'Informe um CPF válido.' }, 400);
     if (birthDate && !validDate(birthDate)) return json({ error: 'Informe uma data de nascimento válida.' }, 400);
 
+    const duplicateSelect = 'id,full_name,email,cpf,whatsapp,birth_date,marketing_consent,source_type,source_label,source_event_id,utm_source,utm_campaign';
     const [cpfLookup, whatsappLookup] = await Promise.all([
-      cpf ? admin.from('visitors').select('id').eq('organization_id', organizationId).eq('cpf', cpf).limit(1).maybeSingle() : Promise.resolve({ data: null, error: null }),
-      whatsapp ? admin.from('visitors').select('id').eq('organization_id', organizationId).eq('whatsapp', whatsapp).limit(1).maybeSingle() : Promise.resolve({ data: null, error: null }),
+      cpf ? admin.from('visitors').select(duplicateSelect).eq('organization_id', organizationId).eq('cpf', cpf).limit(1).maybeSingle() : Promise.resolve({ data: null, error: null }),
+      whatsapp ? admin.from('visitors').select(duplicateSelect).eq('organization_id', organizationId).eq('whatsapp', whatsapp).limit(1).maybeSingle() : Promise.resolve({ data: null, error: null }),
     ]);
     if (cpfLookup.error) throw cpfLookup.error;
     if (whatsappLookup.error) throw whatsappLookup.error;
+    const sameExistingVisitor = cpfLookup.data
+      && whatsappLookup.data
+      && cpfLookup.data.id === whatsappLookup.data.id
+      ? cpfLookup.data
+      : null;
+    const canResume = !!sameExistingVisitor
+      && !!birthDate
+      && sameExistingVisitor.birth_date === birthDate
+      && !!email
+      && String(sameExistingVisitor.email || '').trim().toLowerCase() === email;
+    if (canResume) {
+      if (sourceEventId) {
+        const { error: linkError } = await admin
+          .from('event_visitors')
+          .upsert(
+            { event_id: sourceEventId, visitor_id: sameExistingVisitor.id },
+            { onConflict: 'event_id,visitor_id', ignoreDuplicates: true },
+          );
+        if (linkError) throw linkError;
+      }
+      const userAgent = req.headers.get('user-agent') || null;
+      await admin.from('consent_logs').insert([
+        { visitor_id: sameExistingVisitor.id, consent_type: 'privacy_terms', accepted: true, policy_version: '1.2', user_agent: userAgent },
+        { visitor_id: sameExistingVisitor.id, consent_type: 'marketing', accepted: !!body.marketing_consent, policy_version: '1.2', user_agent: userAgent },
+      ]);
+      return json({
+        ok: true,
+        resumed: true,
+        message: 'Este cliente já estava cadastrado. O acesso existente foi recuperado com segurança.',
+        visitor: sameExistingVisitor,
+      });
+    }
     if (cpfLookup.data || whatsappLookup.data) return duplicateResponse(!!cpfLookup.data, !!whatsappLookup.data);
 
-    let sourceEventId = String(body.source_event_id || body.event_id || '').trim() || null;
-    if (sourceEventId) {
-      const { data: event } = await admin.from('events').select('id,organization_id,title').eq('id', sourceEventId).maybeSingle();
-      if (!event || event.organization_id !== organizationId) sourceEventId = null;
-    }
-
-    const known = new Set(['organization_id','full_name','housing_type','street','neighborhood','city','whatsapp','email','cpf','birth_date','has_solar','privacy','marketing_consent','custom_fields','source_type','source_label','source_event_id','event_id','source_campaign','utm_source','utm_medium','utm_campaign','utm_content','utm_term','referrer','landing_path']);
+    const known = new Set(['organization_id','full_name','housing_type','street','neighborhood','city','whatsapp','email','cpf','birth_date','has_solar','privacy','marketing_consent','custom_fields','source_type','source_label','source_event_id','event_id','event_slug','source_campaign','utm_source','utm_medium','utm_campaign','utm_content','utm_term','referrer','landing_path']);
     const custom: Record<string, unknown> = { ...(body.custom_fields || {}) };
     for (const field of fields || []) if (!known.has(field.field_key) && field.field_key in body) custom[field.field_key] = body[field.field_key];
 
@@ -148,6 +203,19 @@ Deno.serve(async (req) => {
       if (message.includes('VISITOR_DUPLICATE_CPF')) return duplicateResponse(true, false);
       if (message.includes('VISITOR_DUPLICATE_WHATSAPP')) return duplicateResponse(false, true);
       throw insertError || new Error('Não foi possível concluir o cadastro.');
+    }
+
+    if (sourceEventId) {
+      const { error: linkError } = await admin
+        .from('event_visitors')
+        .upsert(
+          { event_id: sourceEventId, visitor_id: visitor.id },
+          { onConflict: 'event_id,visitor_id', ignoreDuplicates: true },
+        );
+      if (linkError) {
+        await admin.from('visitors').delete().eq('id', visitor.id);
+        throw linkError;
+      }
     }
 
     const userAgent = req.headers.get('user-agent') || null;
