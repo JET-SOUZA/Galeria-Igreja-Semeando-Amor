@@ -5,17 +5,21 @@ import * as tus from 'tus-js-client';
 import {SB,KEY,adminHeaders,session} from '../../../../../lib/sb';
 
 type EventRow={id:string;title:string;slug:string;organization_id:string;gallery_access:string;face_search_enabled:boolean};
-type ServerItem={client_key:string;status:string;error_message?:string|null;file_name:string;size_bytes:number};
+type ServerItem={client_key:string;status:string;error_message?:string|null;file_name:string;size_bytes:number;progress_bytes?:number;storage_path?:string|null;photo_id?:string|null};
 type Batch={id:string;status:string;total_files:number;completed_files:number;failed_files:number;total_bytes:number;completed_bytes:number;created_at:string};
 type StorageInfo={backend_id:string;object_prefix:string;backend:{provider:string;backend_code:string;label:string;bucket_name:string;active:boolean;status:string;message?:string|null;max_file_bytes?:number|null;capacity_bytes?:number|null;usable_capacity_bytes?:number|null};backend_used_bytes:number;backend_available_bytes:number|null};
 type MultipartPart={part_number:number;etag?:string;size:number};
 type RejectedFile={name:string;reason:string};
 type ProcessResult={ok:true}|{ok:false;error:string};
+type ActiveItem={name:string;pct:number;stage:string};
 
 const PREVIEW_TARGET=3*1024*1024;
 const PREVIEW_MAX_SIDE=3600;
 const CONCURRENCY=3;
 const PART_RETRIES=5;
+const FILE_RETRIES=3;
+const CLOUDINARY_RETRIES=3;
+const SAFE_PICK_SIZE=100;
 const ACCEPTED_EXT=/\.(jpe?g|png|webp|heic|heif|avif|tiff?)$/i;
 const RAW_EXT=/\.(cr2|cr3|nef|nrw|arw|dng|raf|orf|rw2|pef)$/i;
 const TIFF_EXT=/\.tiff?$/i;
@@ -24,6 +28,19 @@ const ACCEPTED_MIME=new Set(['image/jpeg','image/png','image/webp','image/heic',
 const bytes=(n:number)=>n>=1073741824?`${(n/1073741824).toFixed(2)} GB`:n>=1048576?`${(n/1048576).toFixed(1)} MB`:`${Math.round(n/1024)} KB`;
 const keyOf=(f:File)=>`${f.webkitRelativePath||f.name}::${f.size}::${f.lastModified}`;
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
+
+async function retryStage<T>(work:()=>Promise<T>,attempts:number,onRetry?:(attempt:number,error:Error)=>void){
+  let last:Error=new Error('Falha inesperada.');
+  for(let attempt=1;attempt<=attempts;attempt++){
+    try{return await work()}catch(error:any){
+      last=error instanceof Error?error:new Error(String(error||'Falha inesperada.'));
+      if(attempt>=attempts)break;
+      onRetry?.(attempt,last);
+      await sleep(Math.min(12000,1000*Math.pow(2,attempt-1)));
+    }
+  }
+  throw last;
+}
 
 async function canvasBlob(source:Blob,maxSide:number,quality:number){
   const url=URL.createObjectURL(source);
@@ -89,7 +106,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
   const[msg,setMsg]=useState('');
   const[done,setDone]=useState(0);
   const[failed,setFailed]=useState(0);
-  const[active,setActive]=useState<Record<string,{name:string;pct:number}>>({});
+  const[active,setActive]=useState<Record<string,ActiveItem>>({});
   const[failures,setFailures]=useState<{file:File;error:string}[]>([]);
   const[rejected,setRejected]=useState<RejectedFile[]>([]);
   const[ignoredFiles,setIgnoredFiles]=useState<RejectedFile[]>([]);
@@ -139,7 +156,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
       if(!er.ok||!es?.[0])throw Error('Evento não encontrado.');
       const ev=es[0];
       setEvent(ev);
-      const d=await batchApi(undefined,`?event_id=${encodeURIComponent(ev.id)}${batch?`&batch_id=${encodeURIComponent(batch)}`:''}`);
+      const d=await batchApi(undefined,`?event_id=${encodeURIComponent(ev.id)}${batch?`&batch_id=${encodeURIComponent(batch)}`:''}&reconcile=1`);
       setStorage(d.storage||null);
       setBatches(d.batches||[]);
       setServerItems(d.items||[]);
@@ -153,6 +170,11 @@ export default function MassUpload({params}:{params:{slug:string}}){
   }
 
   useEffect(()=>{load()},[params.slug]);
+  useEffect(()=>{
+    if(!event)return;
+    const manifest={event_id:event.id,batch_id:batchId||null,updated_at:new Date().toISOString(),files:files.map(f=>({client_key:keyOf(f),name:f.name,size:f.size,last_modified:f.lastModified}))};
+    if(files.length||batchId)localStorage.setItem(`semeando-upload:${event.id}`,JSON.stringify(manifest));
+  },[event,batchId,files]);
   useEffect(()=>{
     if(!running)return;
     const warn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue='';};
@@ -194,7 +216,9 @@ export default function MassUpload({params}:{params:{slug:string}}){
       else if(/\.aae$/i.test(file.name))ignoredNow.push({name,reason:'arquivo auxiliar de edição do iPhone'});
       else ignoredNow.push({name,reason:'não é uma imagem compatível'});
     }
-    setFiles(accepted);
+    const merged=new Map(files.map(f=>[keyOf(f),f]));
+    for(const file of accepted)merged.set(keyOf(file),file);
+    setFiles(Array.from(merged.values()));
     setRejected(blocked);
     setIgnoredFiles(ignoredNow);
     setFailures([]);
@@ -205,14 +229,16 @@ export default function MassUpload({params}:{params:{slug:string}}){
         if(/\.(heic|heif)$/i.test(f.name)||/heic|heif/i.test(f.type))heif++;
         else if(/\.jpe?g$/i.test(f.name)||f.type==='image/jpeg')jpeg++;
       }
-      notes.push(`${accepted.length.toLocaleString('pt-BR')} imagens compatíveis selecionadas.`);
+      notes.push(`${accepted.length.toLocaleString('pt-BR')} imagens compatíveis adicionadas à fila.`);
       if(heif||jpeg)notes.push(`Recebido do aparelho: ${jpeg.toLocaleString('pt-BR')} JPEG e ${heif.toLocaleString('pt-BR')} HEIF/HEIC.`);
     }
     if(blocked.length)notes.push(`${blocked.length.toLocaleString('pt-BR')} arquivo(s) precisa(m) ser convertido(s) antes da carga.`);
     if(ignoredNow.length)notes.push(`${ignoredNow.length.toLocaleString('pt-BR')} arquivo(s) que não são imagem foram ignorados; abra a lista para conferir os nomes.`);
+    if(selected.length>SAFE_PICK_SIZE)notes.push(`Para maior estabilidade no iPhone, prefira adicionar até ${SAFE_PICK_SIZE} fotos por seleção.`);
     setMsg(notes.join(' ')||'Nenhuma imagem compatível foi selecionada.');
     setPaused(false);
     stopRef.current=false;
+    e.target.value='';
   }
 
   async function entitlementCheck(count:number,total:number){
@@ -309,26 +335,31 @@ export default function MassUpload({params}:{params:{slug:string}}){
   async function processOne(file:File,id:string):Promise<ProcessResult>{
     if(!event||!storage)throw Error('Evento indisponível.');
     const key=keyOf(file);
-    await batchApi({action:'item_start',batch_id:id,client_key:key});
-    setActive(v=>({...v,[key]:{name:file.name,pct:0}}));
+    setActive(v=>({...v,[key]:{name:file.name,pct:0,stage:'Verificando'}}));
     try{
-      const path=await uploadOriginal(file,pct=>setActive(v=>({...v,[key]:{name:file.name,pct}})));
-      setActive(v=>({...v,[key]:{name:file.name,pct:94}}));
-      const pv=await preparePreview(file);
-      const fd=new FormData();
-      fd.append('file',pv);
-      fd.append('upload_preset','semeando_memorias');
-      fd.append('folder',`semeando-memorias/eventos/${event.slug}`);
-      setActive(v=>({...v,[key]:{name:file.name,pct:97}}));
-      const cr=await fetch('https://api.cloudinary.com/v1_1/to3hnwdl/image/upload',{method:'POST',body:fd});
-      const c=await cr.json();
-      if(!cr.ok)throw Error(c?.error?.message||'Falha ao criar prévia.');
-      setActive(v=>({...v,[key]:{name:file.name,pct:99}}));
-      const row={event_id:event.id,cloudinary_asset_id:c.asset_id,public_id:c.public_id,secure_url:c.secure_url,width:c.width||null,height:c.height||null,bytes:c.bytes||null,format:c.format||null,original_filename:file.name,status:'published',source_type:'upload',original_storage_provider:backend?.provider||'supabase',original_storage_backend_id:storage.backend_id||null,original_storage_bucket:backend?.bucket_name||'photo-originals',original_storage_path:path,original_bytes:file.size,original_mime:file.type||null};
-      const pr=await fetch(`${SB}/rest/v1/photos`,{method:'POST',headers:{...await adminHeaders(),Prefer:'return=representation'},body:JSON.stringify(row)});
-      const pd=await pr.json();
-      if(!pr.ok)throw Error(pd?.message||pd?.details||'Falha ao registrar foto.');
-      await batchApi({action:'item_done',batch_id:id,client_key:key,size_bytes:file.size,storage_path:path,photo_id:pd?.[0]?.id||null});
+      const prepared=await batchApi({action:'item_prepare',batch_id:id,client_key:key});
+      if(prepared.done){setDone(v=>v+1);return{ok:true};}
+      setActive(v=>({...v,[key]:{name:file.name,pct:2,stage:'Gerando prévia JPEG'}}));
+      const pv=await retryStage(()=>preparePreview(file),FILE_RETRIES,(attempt)=>setActive(v=>({...v,[key]:{name:file.name,pct:2,stage:`Prévia: nova tentativa ${attempt+1}/${FILE_RETRIES}`}})));
+      let path=String(prepared.storage_path||'');
+      if(!path){
+        setActive(v=>({...v,[key]:{name:file.name,pct:5,stage:'Enviando original'}}));
+        path=await retryStage(()=>uploadOriginal(file,pct=>setActive(v=>({...v,[key]:{name:file.name,pct:Math.max(5,pct),stage:'Enviando original'}}))),FILE_RETRIES,(attempt)=>setActive(v=>({...v,[key]:{name:file.name,pct:5,stage:`Original: nova tentativa ${attempt+1}/${FILE_RETRIES}`}})));
+        await batchApi({action:'item_checkpoint',batch_id:id,client_key:key,size_bytes:file.size,storage_path:path});
+      }
+      setActive(v=>({...v,[key]:{name:file.name,pct:94,stage:'Enviando prévia'}}));
+      const c=await retryStage(async()=>{
+        const fd=new FormData();
+        fd.append('file',pv);
+        fd.append('upload_preset','semeando_memorias');
+        fd.append('folder',`semeando-memorias/eventos/${event.slug}`);
+        const cr=await fetch('https://api.cloudinary.com/v1_1/to3hnwdl/image/upload',{method:'POST',body:fd});
+        const data=await cr.json().catch(()=>({}));
+        if(!cr.ok)throw Error(data?.error?.message||`Falha ao criar prévia (${cr.status}).`);
+        return data;
+      },CLOUDINARY_RETRIES,(attempt)=>setActive(v=>({...v,[key]:{name:file.name,pct:94,stage:`Prévia: nova tentativa ${attempt+1}/${CLOUDINARY_RETRIES}`}})));
+      setActive(v=>({...v,[key]:{name:file.name,pct:99,stage:'Registrando foto'}}));
+      await retryStage(()=>batchApi({action:'register_photo',batch_id:id,client_key:key,photo:{cloudinary_asset_id:c.asset_id,public_id:c.public_id,secure_url:c.secure_url,width:c.width||null,height:c.height||null,bytes:c.bytes||null,format:c.format||null,original_filename:file.name,original_storage_provider:backend?.provider||'supabase',original_storage_backend_id:storage.backend_id||null,original_storage_bucket:backend?.bucket_name||'photo-originals',original_storage_path:path,original_bytes:file.size,original_mime:file.type||null}}),FILE_RETRIES);
       setDone(v=>v+1);
       return{ok:true};
     }catch(e:any){
@@ -367,7 +398,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
           return;
         }
       }
-      setMsg(`Carga iniciada no ${transport} com até ${CONCURRENCY} uploads simultâneos.`);
+      setMsg(`Carga iniciada no ${transport} com até ${CONCURRENCY} uploads simultâneos. Falhas isoladas recebem até ${FILE_RETRIES} tentativas automáticas.`);
       const worker=async()=>{
         while(true){
           if(stopRef.current)return;
@@ -393,17 +424,23 @@ export default function MassUpload({params}:{params:{slug:string}}){
   }
 
   function pause(){stopRef.current=true;setMsg('Pausa solicitada. Não iniciaremos novos arquivos; os atuais serão concluídos.');}
-  async function retry(){const fs=failures.map(x=>x.file);setFailed(v=>Math.max(0,v-fs.length));await run(fs);}
+  async function retry(){const failedKeys=new Set([...failures.map(x=>keyOf(x.file)),...serverItems.filter(x=>x.status==='failed').map(x=>x.client_key)]);const fs=files.filter(x=>failedKeys.has(keyOf(x)));setFailed(v=>Math.max(0,v-fs.length));await run(fs);}
   const pct=files.length?Math.round((done/Math.max(1,files.length))*100):0;
+  const serverProgress=useMemo(()=>({
+    sent:serverItems.filter(i=>Number(i.progress_bytes||0)>=Number(i.size_bytes||0)||!!i.storage_path||['registered','skipped'].includes(i.status)).length,
+    processed:serverItems.filter(i=>['registered','skipped'].includes(i.status)).length,
+    pending:serverItems.filter(i=>['queued','uploading'].includes(i.status)).length,
+    errors:serverItems.filter(i=>i.status==='failed').length,
+  }),[serverItems]);
 
   return <main className="mass">
     <header><div><a href={`/admin/evento/${params.slug}/fotos`}>← Gerenciar fotos</a><span>CARGA MASSIVA</span><h1>{event?.title||'Evento grande'}</h1><p>Fila segura para milhares de originais, com retomada, tentativas automáticas e processamento em segundo plano.</p></div><a className="secondary" href={`/evento/${params.slug}`}>Ver galeria</a></header>
     {msg&&<div className="notice">{msg}</div>}
     <section className="readiness"><div className="head"><div><span>PRONTIDÃO DO ARMAZENAMENTO</span><h2>{backend?.label||'Verificando storage...'}</h2></div><b className={`state ${backendOk&&providerOk?'ok':'bad'}`}>{loading?'VERIFICANDO':backendOk&&providerOk?'ATIVO':'NÃO LIBERADO'}</b></div><div className="metrics"><article><small>Backend</small><strong>{backend?.provider?.toUpperCase()||'—'}</strong></article><article><small>Disponível seguro</small><strong>{available==null?'Ilimitado/externo':bytes(available)}</strong></article><article><small>Máx. por arquivo</small><strong>{backend?.max_file_bytes?bytes(backend.max_file_bytes):'—'}</strong></article><article><small>Método</small><strong>{backend?.provider==='r2'||backend?.provider==='s3'?'MULTIPART 8 MB':backend?.provider==='supabase'?'TUS RESUMÍVEL':'—'}</strong></article></div>{backend?.message&&<p className="warning">⚠ {backend.message}</p>}</section>
-    <section className="picker"><div><span>01 • SELECIONAR FOTOS</span><h2>Escolha arquivos ou uma pasta inteira</h2><p>Use um computador com internet estável. JPEG, PNG, WebP, AVIF e HEIC são aceitos; arquivos RAW de câmera devem ser exportados em JPEG de qualidade máxima.</p><p className="iphoneNote"><b>iPhone:</b> a Fototeca pode converter HEIF em JPEG antes de entregar a foto ao navegador. Para conservar o HEIF exato, salve/exporte no app Arquivos e selecione o arquivo por lá.</p></div><div className="pickButtons"><label>＋ Selecionar arquivos<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" onChange={pick}/></label><label className="folder">▣ Selecionar pasta<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" {...({webkitdirectory:'',directory:''} as any)} onChange={pick}/></label></div></section>
+    <section className="picker"><div><span>01 • SELECIONAR FOTOS</span><h2>Monte a fila em partes</h2><p>Adicione até {SAFE_PICK_SIZE} fotos por seleção no iPhone e repita até completar o evento. No computador, você também pode escolher uma pasta inteira.</p><p className="iphoneNote"><b>Original preservado:</b> para conservar o HEIC exato, salve/exporte no app Arquivos e selecione por lá. A Fototeca pode entregar uma cópia JPEG ao navegador.</p></div><div className="pickButtons"><label>＋ Adicionar fotos<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" onChange={pick}/></label><label className="folder">▣ Adicionar pasta<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" {...({webkitdirectory:'',directory:''} as any)} onChange={pick}/></label>{files.length>0&&!running&&<button className="clear" onClick={()=>{setFiles([]);setFailures([]);setRejected([]);setIgnoredFiles([]);setMsg('Fila local limpa. Nenhuma foto já enviada foi apagada.')}}>Limpar seleção local</button>}</div></section>
     {(files.length>0||rejected.length>0||ignoredFiles.length>0)&&<><section className="analysis"><div className="analysisTitle"><div><span>02 • ANÁLISE DO LOTE</span><h2>{files.length.toLocaleString('pt-BR')} fotos • {bytes(stats.total)}</h2><small>Arquivos recebidos preservados sem recompressão • prévias somadas de até {bytes(stats.previewCap)}</small></div><b className={`state ${ready?'ok':'bad'}`}>{ready?'PRONTO PARA INICIAR':'BLOQUEADO'}</b></div><div className="checks"><article className={fileOk?'okc':'badc'}><b>{fileOk?'✓':'!'}</b><div><strong>Maior arquivo</strong><small>{bytes(stats.max)} {backend?.max_file_bytes?`de ${bytes(backend.max_file_bytes)} permitidos`:''}</small></div></article><article className={capacityOk?'okc':'badc'}><b>{capacityOk?'✓':'!'}</b><div><strong>Capacidade</strong><small>{capacityOk?'O lote cabe no backend atual.':'O lote ultrapassa a capacidade segura atual.'}</small></div></article><article className={backendOk&&providerOk?'okc':'badc'}><b>{backendOk&&providerOk?'✓':'!'}</b><div><strong>Storage</strong><small>{backendOk&&providerOk?'Backend ativo e compatível.':'Storage dedicado ainda precisa ser configurado.'}</small></div></article><article className={rejected.length===0?'okc':'badc'}><b>{rejected.length===0?'✓':'!'}</b><div><strong>Formatos</strong><small>{rejected.length===0?'Todas as fotos são compatíveis.':`${rejected.length} arquivo(s) exige(m) conversão.`}</small></div></article><article className="okc"><b>3</b><div><strong>Concorrência controlada</strong><small>3 originais e 1 prévia pesada por vez.</small></div></article></div>{rejected.length>0&&<div className="rejected"><b>Converta estes arquivos antes de iniciar:</b>{rejected.slice(0,20).map((x,i)=><p key={`${x.name}-${i}`}><strong>{x.name}</strong> — {x.reason}</p>)}{rejected.length>20&&<p>… e mais {rejected.length-20} arquivo(s).</p>}</div>}{ignoredFiles.length>0&&<details className="ignored"><summary>{ignoredFiles.length.toLocaleString('pt-BR')} arquivo(s) que não são imagem foram ignorados — ver nomes</summary>{ignoredFiles.slice(0,50).map((x,i)=><p key={`${x.name}-${i}`}><strong>{x.name}</strong> — {x.reason}</p>)}{ignoredFiles.length>50&&<p>… e mais {ignoredFiles.length-50} arquivo(s).</p>}</details>}<div className="actions"><button className="primary" disabled={!ready||running} onClick={()=>run()}>{running?'Processando...':'▶ Iniciar carga segura'}</button>{running&&<button className="secondary" onClick={pause}>Ⅱ Pausar após atuais</button>}{failures.length>0&&!running&&<button className="retry" onClick={retry}>↻ Tentar {failures.length} falha(s) novamente</button>}</div></section>
-    <section className="progress"><div className="barHead"><div><span>PROGRESSO</span><b>{done.toLocaleString('pt-BR')} de {files.length.toLocaleString('pt-BR')}</b></div><strong>{pct}%</strong></div><div className="bar"><i style={{width:`${pct}%`}}/></div><div className="progressStats"><span>✓ {done} concluídas</span><span>! {failed} falhas</span><span>↻ {Object.keys(active).length} em andamento</span><span>… {Math.max(0,files.length-done-failed-Object.keys(active).length)} aguardando</span></div>{Object.entries(active).length>0&&<div className="activeList">{Object.entries(active).map(([k,a])=><div key={k}><span title={a.name}>{a.name}</span><b>{a.pct}%</b></div>)}</div>}{failures.length>0&&<details><summary>Ver falhas desta sessão ({failures.length})</summary>{failures.slice(0,50).map((x,i)=><p key={i}><b>{x.file.name}</b> — {x.error}</p>)}</details>}</section></>}
+    <section className="progress"><div className="barHead"><div><span>PROGRESSO REAL</span><b>{done.toLocaleString('pt-BR')} de {files.length.toLocaleString('pt-BR')}</b></div><strong>{pct}%</strong></div><div className="bar"><i style={{width:`${pct}%`}}/></div><div className="progressStats"><span>↑ {Math.max(serverProgress.sent,done)} enviados</span><span>✓ {Math.max(serverProgress.processed,done)} processados</span><span>… {Math.max(serverProgress.pending,files.length-done-failed-Object.keys(active).length)} pendentes</span><span>! {Math.max(serverProgress.errors,failed)} com erro</span><span>↻ {Object.keys(active).length} em andamento</span></div>{Object.entries(active).length>0&&<div className="activeList">{Object.entries(active).map(([k,a])=><div key={k}><span title={a.name}>{a.name}<small>{a.stage}</small></span><b>{a.pct}%</b></div>)}</div>}{failures.length>0&&<details><summary>Ver falhas desta sessão ({failures.length})</summary>{failures.slice(0,50).map((x,i)=><p key={i}><b>{x.file.name}</b> — {x.error}</p>)}</details>}</section></>}
     <section className="history"><div><span>ÚLTIMOS LOTES</span><h2>Histórico do evento</h2></div>{batches.length?<div className="batchList">{batches.map(b=><button key={b.id} onClick={()=>load(b.id)}><span>{new Date(b.created_at).toLocaleString('pt-BR')}</span><b>{b.completed_files}/{b.total_files}</b><em className={b.status}>{b.status}</em><small>{bytes(Number(b.total_bytes||0))}</small></button>)}</div>:<p>Nenhum lote registrado ainda.</p>}</section>
-    <style jsx>{`.mass{max-width:1180px;margin:auto;padding:90px 18px 60px;color:#f6f7f9}.mass>header{display:flex;justify-content:space-between;gap:18px;align-items:end}.mass>header a{color:#a2a9b3;text-decoration:none;font-weight:800}.mass>header span,.readiness span,.picker span,.analysis span,.progress span,.history span{display:block;color:#ff9250;font-size:10px;letter-spacing:.15em;font-weight:950;margin-top:10px}.mass h1{font-size:clamp(34px,5vw,56px);margin:7px 0}.mass h2{margin:5px 0}.mass header p,.picker p,.warning,.history p{color:#9ca3ad;line-height:1.55}.picker .iphoneNote{color:#ffb184;font-size:11px;max-width:760px;margin-bottom:0}.notice{margin:16px 0;background:#24170f;border:1px solid #60391f;border-radius:13px;padding:12px}.secondary,.primary,.retry,.pickButtons label{border:0;border-radius:11px;padding:11px 14px;background:#282e36;color:#fff;text-decoration:none;font-weight:900;cursor:pointer}.readiness,.picker,.analysis,.progress,.history{background:#12161b;border:1px solid #303740;border-radius:20px;padding:18px;margin-top:15px}.head,.analysisTitle,.barHead,.picker,.actions{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.analysisTitle small{color:#8f969f}.state{font-size:9px;padding:8px 10px;border-radius:999px}.state.ok{background:#16372a;color:#7fe3b2;border:1px solid #276046}.state.bad{background:#351d18;color:#ff9b86;border:1px solid #6b352a}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}.metrics article{background:#0c0f13;border:1px solid #292f37;border-radius:13px;padding:12px;display:grid}.metrics small{color:#838b96}.metrics strong{margin-top:4px}.warning{background:#251a12;padding:10px;border-radius:10px}.pickButtons{display:flex;gap:8px;flex-wrap:wrap}.pickButtons label{background:#ff7417;color:#101114}.pickButtons .folder{background:#2a3038;color:#fff}.checks{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}.checks article{display:flex;align-items:center;gap:9px;border:1px solid #303740;background:#0e1115;border-radius:13px;padding:11px}.checks article>b{width:29px;height:29px;border-radius:9px;display:grid;place-items:center;background:#222831;flex:none}.checks article div{display:grid}.checks small{color:#8b929c;font-size:9px}.checks .okc>b{color:#70d9a8}.checks .badc{border-color:#773b30}.checks .badc>b{color:#ff8872}.rejected{background:#2b1713;border:1px solid #75382d;color:#ffc2b6;border-radius:12px;padding:11px;margin-bottom:12px}.rejected>p{font-size:10px;margin:6px 0;overflow-wrap:anywhere}.ignored{color:#aeb4bc;font-size:10px;margin:0 0 12px}.ignored summary{cursor:pointer;font-weight:800}.ignored p{margin:6px 0;overflow-wrap:anywhere}.actions{justify-content:flex-start}.actions .primary{background:#ff7417;color:#111}.actions button:disabled{opacity:.45;cursor:not-allowed}.retry{background:#855225}.barHead{align-items:end}.barHead div{display:grid}.barHead strong{font-size:28px}.bar{height:12px;border-radius:999px;background:#292e35;overflow:hidden;margin:10px 0}.bar i{display:block;height:100%;background:#ff7417;transition:width .2s}.progressStats{display:flex;gap:14px;flex-wrap:wrap;color:#a7aeb7;font-size:10px}.activeList{display:grid;gap:5px;margin-top:12px}.activeList div{display:flex;justify-content:space-between;gap:10px;background:#0c0f13;padding:8px 10px;border-radius:9px}.activeList span{margin:0;color:#c8ccd2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0;text-transform:none}.activeList b{color:#ff9855}.progress details{margin-top:12px;color:#b5bbc4}.progress details p{font-size:10px}.batchList{display:grid;gap:6px;margin-top:12px}.batchList button{display:grid;grid-template-columns:1.6fr .8fr .8fr .8fr;gap:8px;align-items:center;text-align:left;background:#0d1014;border:1px solid #2d333b;color:#fff;border-radius:10px;padding:10px}.batchList span{margin:0;color:#a7adb6;letter-spacing:0;font-size:9px}.batchList em{font-style:normal;font-size:9px;color:#ff9b61}.batchList small{text-align:right;color:#8e959f}@media(max-width:900px){.checks{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.mass{padding:82px 11px 45px}.mass>header{display:grid}.metrics{grid-template-columns:1fr 1fr}.picker{display:grid}.pickButtons{display:grid;grid-template-columns:1fr 1fr}.pickButtons label{text-align:center;font-size:10px}.batchList button{grid-template-columns:1fr 1fr}.batchList small{text-align:left}.analysisTitle{align-items:flex-start}}`}</style>
+    <style jsx>{`.mass{max-width:1180px;margin:auto;padding:90px 18px 60px;color:#f6f7f9}.mass>header{display:flex;justify-content:space-between;gap:18px;align-items:end}.mass>header a{color:#a2a9b3;text-decoration:none;font-weight:800}.mass>header span,.readiness span,.picker span,.analysis span,.progress span,.history span{display:block;color:#ff9250;font-size:10px;letter-spacing:.15em;font-weight:950;margin-top:10px}.mass h1{font-size:clamp(34px,5vw,56px);margin:7px 0}.mass h2{margin:5px 0}.mass header p,.picker p,.warning,.history p{color:#9ca3ad;line-height:1.55}.picker .iphoneNote{color:#ffb184;font-size:11px;max-width:760px;margin-bottom:0}.notice{margin:16px 0;background:#24170f;border:1px solid #60391f;border-radius:13px;padding:12px}.secondary,.primary,.retry,.pickButtons label,.pickButtons .clear{border:0;border-radius:11px;padding:11px 14px;background:#282e36;color:#fff;text-decoration:none;font-weight:900;cursor:pointer}.readiness,.picker,.analysis,.progress,.history{background:#12161b;border:1px solid #303740;border-radius:20px;padding:18px;margin-top:15px}.head,.analysisTitle,.barHead,.picker,.actions{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.analysisTitle small{color:#8f969f}.state{font-size:9px;padding:8px 10px;border-radius:999px}.state.ok{background:#16372a;color:#7fe3b2;border:1px solid #276046}.state.bad{background:#351d18;color:#ff9b86;border:1px solid #6b352a}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}.metrics article{background:#0c0f13;border:1px solid #292f37;border-radius:13px;padding:12px;display:grid}.metrics small{color:#838b96}.metrics strong{margin-top:4px}.warning{background:#251a12;padding:10px;border-radius:10px}.pickButtons{display:flex;gap:8px;flex-wrap:wrap}.pickButtons label{background:#ff7417;color:#101114}.pickButtons .folder{background:#2a3038;color:#fff}.pickButtons .clear{background:#3b2220;color:#ffb8ad}.checks{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}.checks article{display:flex;align-items:center;gap:9px;border:1px solid #303740;background:#0e1115;border-radius:13px;padding:11px}.checks article>b{width:29px;height:29px;border-radius:9px;display:grid;place-items:center;background:#222831;flex:none}.checks article div{display:grid}.checks small{color:#8b929c;font-size:9px}.checks .okc>b{color:#70d9a8}.checks .badc{border-color:#773b30}.checks .badc>b{color:#ff8872}.rejected{background:#2b1713;border:1px solid #75382d;color:#ffc2b6;border-radius:12px;padding:11px;margin-bottom:12px}.rejected>p{font-size:10px;margin:6px 0;overflow-wrap:anywhere}.ignored{color:#aeb4bc;font-size:10px;margin:0 0 12px}.ignored summary{cursor:pointer;font-weight:800}.ignored p{margin:6px 0;overflow-wrap:anywhere}.actions{justify-content:flex-start}.actions .primary{background:#ff7417;color:#111}.actions button:disabled{opacity:.45;cursor:not-allowed}.retry{background:#855225}.barHead{align-items:end}.barHead div{display:grid}.barHead strong{font-size:28px}.bar{height:12px;border-radius:999px;background:#292e35;overflow:hidden;margin:10px 0}.bar i{display:block;height:100%;background:#ff7417;transition:width .2s}.progressStats{display:flex;gap:14px;flex-wrap:wrap;color:#a7aeb7;font-size:10px}.activeList{display:grid;gap:5px;margin-top:12px}.activeList div{display:flex;justify-content:space-between;gap:10px;background:#0c0f13;padding:8px 10px;border-radius:9px}.activeList span{margin:0;color:#c8ccd2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0;text-transform:none;display:grid}.activeList span small{color:#838b96;font-size:9px}.activeList b{color:#ff9855}.progress details{margin-top:12px;color:#b5bbc4}.progress details p{font-size:10px}.batchList{display:grid;gap:6px;margin-top:12px}.batchList button{display:grid;grid-template-columns:1.6fr .8fr .8fr .8fr;gap:8px;align-items:center;text-align:left;background:#0d1014;border:1px solid #2d333b;color:#fff;border-radius:10px;padding:10px}.batchList span{margin:0;color:#a7adb6;letter-spacing:0;font-size:9px}.batchList em{font-style:normal;font-size:9px;color:#ff9b61}.batchList small{text-align:right;color:#8e959f}@media(max-width:900px){.checks{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.mass{padding:82px 11px 45px}.mass>header{display:grid}.metrics{grid-template-columns:1fr 1fr}.picker{display:grid}.pickButtons{display:grid;grid-template-columns:1fr 1fr}.pickButtons label,.pickButtons .clear{text-align:center;font-size:10px}.batchList button{grid-template-columns:1fr 1fr}.batchList small{text-align:left}.analysisTitle{align-items:flex-start}}`}</style>
   </main>;
 }
