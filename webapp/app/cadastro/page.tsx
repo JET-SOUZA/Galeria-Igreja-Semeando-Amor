@@ -81,9 +81,12 @@ export default function Cadastro(){
   })();
  },[]);
 
- const fields=(config?.fields?.length?config.fields:defaults)
-  .filter((field:any)=>field.is_enabled!==false)
-  .sort((a:any,b:any)=>a.sort_order-b.sort_order);
+ const configuredFields=(config?.fields?.length?config.fields:defaults).filter((field:any)=>field.is_enabled!==false);
+ const fields=[...configuredFields];
+ if(!fields.some((field:any)=>field.field_key==='average_energy_bill')){
+  fields.push(defaults.find(field=>field.field_key==='average_energy_bill'));
+ }
+ fields.sort((a:any,b:any)=>a.sort_order-b.sort_order);
  const branding=config?.branding||{};
  const org=config?.organization;
  const groups=useMemo(()=>{
