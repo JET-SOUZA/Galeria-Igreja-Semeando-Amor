@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useState} from 'react';
-import {CHURCH_LOGO,LEGACY_LOGO} from './brand';
+import {CHURCH_LOGO,DEVELOPER_LOGO,DEVELOPER_NAME,DEVELOPER_TAGLINE} from './brand';
 import {SB,KEY} from '../lib/sb';
 type Ev={id:string;title:string;slug:string;event_date?:string;location?:string;cover_url?:string;face_search_enabled:boolean;is_paid:boolean;organization_name?:string;organization_logo?:string};
 export default function Home(){
@@ -17,6 +17,6 @@ export default function Home(){
    {error&&<div className="empty-events">{error}</div>}{loading?<div className="events-skeleton"><div/><div/></div>:events.length?<div className="event-cards">{events.map(e=><article className="event-card" key={e.id}><div className="event-card-cover" style={e.cover_url?{backgroundImage:`linear-gradient(180deg,transparent,#0005),url(${e.cover_url})`}:{}}><div className="event-chips">{e.face_search_enabled&&<span className="face-chip">◎ Busca facial</span>}<span className={e.is_paid?'paid-chip':'free-chip'}>{e.is_paid?'Pago':'Gratuito'}</span></div></div><div className="event-card-body"><span className="event-meta">{e.organization_name||'Legacy Semeando Memórias'}</span><span className="event-meta">{e.event_date?new Date(e.event_date+'T12:00:00').toLocaleDateString('pt-BR'):'Evento'}{e.location?` • ${e.location}`:''}</span><h3>{e.title}</h3><p>{e.is_paid?'Pré-visualize as fotos protegidas e escolha suas favoritas.':'Acesse as fotos publicadas deste evento.'}</p><button className="btn event-open" onClick={()=>openEvent(e.slug)}>Abrir galeria</button></div></article>)}</div>:!error&&<div className="empty-events">Nenhuma galeria pública no momento.</div>}
   </section>
   <section className="privacy-band"><div><span className="privacy-icon">🔒</span><div><strong>Público quando o cliente quiser. Privado quando precisar.</strong><p>Cada organização decide quais eventos aparecem nesta vitrine e quais ficam disponíveis somente por um link privado.</p></div></div><a href="/privacidade">Política de Privacidade →</a></section>
-  <footer className="home-footer"><div className="footer-church"><img src={CHURCH_LOGO} alt=""/><div><strong>Legacy Semeando Memórias</strong><span>Galerias inteligentes</span></div></div><div className="developer-signature"><small>Desenvolvido por</small><img src={LEGACY_LOGO} alt="Legacy Solar"/><div><b>Legacy Solar</b><span>Energia que gera legado</span></div></div></footer>
+  <footer className="home-footer"><div className="footer-church"><img src={CHURCH_LOGO} alt=""/><div><strong>Legacy Semeando Memórias</strong><span>Galerias inteligentes</span></div></div><div className="developer-signature"><small>Desenvolvido por</small><img src={DEVELOPER_LOGO} alt={DEVELOPER_NAME}/><div><b>{DEVELOPER_NAME}</b><span>{DEVELOPER_TAGLINE}</span></div></div></footer>
  </main>
 }

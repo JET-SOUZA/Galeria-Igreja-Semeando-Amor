@@ -56,8 +56,9 @@ function storageReadiness(space:any,totalBytes=0){
 }
 
 async function usedForBackend(admin:any,backendId:string){
-  const {data}=await admin.from('event_storage_spaces').select('bytes_used').eq('backend_id',backendId);
-  return(data||[]).reduce((sum:number,row:any)=>sum+Number(row.bytes_used||0),0);
+  const {data,error}=await admin.rpc('storage_backend_usage',{p_backend_id:backendId});
+  if(error)throw error;
+  return Number(data?.bytes||0);
 }
 
 async function recalc(admin:any,batchId:string){
@@ -67,9 +68,12 @@ async function recalc(admin:any,batchId:string){
 }
 
 async function refreshStorage(admin:any,eventId:string){
-  const {data:rows}=await admin.from('photos').select('original_bytes,bytes,original_storage_path').eq('event_id',eventId).is('deleted_at',null);
-  let bytes=0,objects=0;
-  for(const photo of rows||[]){if(photo.original_storage_path){objects++;bytes+=Number(photo.original_bytes||photo.bytes||0)}}
+  const {data:space,error:spaceError}=await admin.from('event_storage_spaces').select('backend_id').eq('event_id',eventId).maybeSingle();
+  if(spaceError)throw spaceError;
+  if(!space?.backend_id)throw Error('STORAGE_SPACE_NOT_FOUND');
+  const {data,error}=await admin.rpc('event_storage_backend_usage',{p_event_id:eventId,p_backend_id:space.backend_id});
+  if(error)throw error;
+  const bytes=Number(data?.bytes||0),objects=Number(data?.objects||0);
   await admin.from('event_storage_spaces').update({bytes_used:bytes,object_count:objects,last_verified_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('event_id',eventId);
   return{bytes,objects};
 }
