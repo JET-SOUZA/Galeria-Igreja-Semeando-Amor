@@ -119,7 +119,20 @@ Deno.serve(async req=>{
       const eventId=String(url.searchParams.get('event_id')||'');
       if(!eventId)return j({error:'event_id obrigatório.'},400);
       const event=await eventScope(c,eventId,false);
-      const reconciled=url.searchParams.get('reconcile')==='1'?await reconcileStale(c.admin,eventId):{reconciled:0,batches:[]};
+      const shouldReconcile=url.searchParams.get('reconcile')==='1';
+      const reconciled=shouldReconcile?await reconcileStale(c.admin,eventId):{reconciled:0,batches:[]};
+      let maintenance={pending_face:0,face_started:false,storage_refreshed:null as null|{bytes:number,objects:number}};
+      if(shouldReconcile){
+        const [{count:pendingFace},storageRefreshed]=await Promise.all([
+          c.admin.from('photos').select('id',{count:'exact',head:true}).eq('event_id',eventId).eq('face_index_status','pending').is('deleted_at',null),
+          refreshStorage(c.admin,eventId),
+        ]);
+        maintenance={
+          pending_face:Number(pendingFace||0),
+          face_started:Number(pendingFace||0)>0&&event.face_search_enabled?await maybeStartFace(c.admin,eventId):false,
+          storage_refreshed:storageRefreshed,
+        };
+      }
       const space=await storageFor(c,eventId);
       const {data:batches}=await c.admin.from('upload_batches').select('*').eq('event_id',eventId).order('created_at',{ascending:false}).limit(10);
       let items:any[]=[];
@@ -131,7 +144,7 @@ Deno.serve(async req=>{
         items=data||[];
       }
       const used=await usedForBackend(c.admin,space.backend_id),ready=storageReadiness(space);
-      return j({ok:true,event,storage:{...space,backend:ready,backend_used_bytes:used,backend_available_bytes:ready.usable_capacity_bytes==null?null:Math.max(0,ready.usable_capacity_bytes-used)},batches:batches||[],batch_id:batchId||null,items,reconciled});
+      return j({ok:true,event,storage:{...space,backend:ready,backend_used_bytes:used,backend_available_bytes:ready.usable_capacity_bytes==null?null:Math.max(0,ready.usable_capacity_bytes-used)},batches:batches||[],batch_id:batchId||null,items,reconciled,maintenance});
     }
 
     if(req.method!=='POST')return j({error:'Método não suportado.'},405);
