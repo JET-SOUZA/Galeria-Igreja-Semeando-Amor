@@ -23,6 +23,8 @@ async function hash(value:string){
   return hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)));
 }
 
+const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+
 async function asaas(path:string,init?:RequestInit){
   if(!ASAAS)throw Error('ASAAS_NOT_CONFIGURED');
   const response=await fetch(BASE+path,{
@@ -150,59 +152,78 @@ Deno.serve(async request=>{
         return j({error:'PROFILE_REQUIRED',message:'Para pagar com segurança, complete seu CPF no cadastro.'},409);
       }
 
-      let customer='';
-      const found=await asaas(`/customers?externalReference=${encodeURIComponent('visitor:'+visitorId)}&limit=1`);
-      customer=found?.data?.[0]?.id||'';
-      if(!customer){
-        const created=await asaas('/customers',{
-          method:'POST',
-          body:JSON.stringify({
-            name:visitor.full_name,
-            cpfCnpj:cpf,
-            email:visitor.email||undefined,
-            mobilePhone:digits(visitor.whatsapp)||undefined,
-            externalReference:'visitor:'+visitorId,
-            notificationDisabled:false,
-          }),
-        });
-        customer=created.id;
-      }
-
       const token=crypto.randomUUID()+crypto.randomUUID();
       const tokenHash=await hash(token);
-      const items=(photos||[]).map((photo:any)=>({
-        photo_id:photo.id,
-        name:photo.original_filename||'Foto',
+      const sortedIds=[...ids].sort();
+      const photosById=new Map((photos||[]).map((photo:any)=>[String(photo.id),photo]));
+      const items=sortedIds.map(photoId=>({
+        photo_id:photoId,
+        name:photosById.get(photoId)?.original_filename||'Foto',
         unit_price:price,
         quantity:1,
       }));
-      const {data:order,error:orderError}=await admin
-        .from('payment_orders')
-        .insert({
-          organization_id:event.organization_id,
-          event_id:event.id,
-          visitor_id:visitorId,
-          provider:'asaas',
-          status:'pending',
-          amount,
-          platform_fee_amount:0,
-          organization_net_amount:amount,
-          // Let the payer choose among the payment methods enabled in Asaas.
-          // A PIX-only invoice can become unpayable when PIX is unavailable
-          // for the connected account, even though the charge is created.
-          payment_method:'UNDEFINED',
-          items,
-          purpose:'event_purchase',
-          metadata:{public_token_hash:tokenHash,event_slug:slug},
-        })
-        .select('*')
-        .single();
-      if(orderError)throw orderError;
+      const checkoutFingerprint=await hash(['event_purchase',event.id,visitorId,...sortedIds].join(':'));
+      const {data:reservation,error:reservationError}=await admin.rpc('reserve_photo_purchase_order',{
+        p_organization_id:event.organization_id,
+        p_event_id:event.id,
+        p_visitor_id:visitorId,
+        p_amount:amount,
+        p_items:items,
+        p_token_hash:tokenHash,
+        p_event_slug:slug,
+        p_checkout_fingerprint:checkoutFingerprint,
+      });
+      if(reservationError)throw reservationError;
+      const order=reservation?.order;
+      if(!order?.id)throw Error('ORDER_RESERVATION_FAILED');
+
+      // Outra aba ou aparelho pode ter reservado o mesmo carrinho enquanto esta
+      // requisicao estava em andamento. Nesse caso reutilizamos o pedido e nunca
+      // criamos uma segunda cobranca no Asaas.
+      if(reservation?.created!==true){
+        let current=order;
+        for(let attempt=0;attempt<12&&!current.invoice_url&&!current.provider_payment_id;attempt++){
+          await wait(350);
+          const {data}=await admin.from('payment_orders').select('*').eq('id',order.id).maybeSingle();
+          if(data)current=data;
+        }
+        const preparing=!current.invoice_url&&!current.provider_payment_id;
+        return j({
+          ok:true,
+          reused:true,
+          preparing,
+          order:{
+            id:current.id,
+            status:current.status,
+            amount:Number(current.amount),
+            invoice_url:current.invoice_url,
+          },
+          access_token:token,
+          message:preparing?'O pagamento ja esta sendo preparado em outra aba ou aparelho. Aguarde alguns segundos e atualize.':'A cobranca existente foi recuperada com seguranca.',
+        },preparing?202:200);
+      }
 
       const due=new Date();
       due.setDate(due.getDate()+1);
       let payment:any;
       try{
+        let customer='';
+        const found=await asaas(`/customers?externalReference=${encodeURIComponent('visitor:'+visitorId)}&limit=1`);
+        customer=found?.data?.[0]?.id||'';
+        if(!customer){
+          const created=await asaas('/customers',{
+            method:'POST',
+            body:JSON.stringify({
+              name:visitor.full_name,
+              cpfCnpj:cpf,
+              email:visitor.email||undefined,
+              mobilePhone:digits(visitor.whatsapp)||undefined,
+              externalReference:'visitor:'+visitorId,
+              notificationDisabled:false,
+            }),
+          });
+          customer=created.id;
+        }
         payment=await asaas('/payments',{
           method:'POST',
           body:JSON.stringify({
@@ -210,7 +231,7 @@ Deno.serve(async request=>{
             billingType:'UNDEFINED',
             value:amount,
             dueDate:due.toISOString().slice(0,10),
-            description:`${ids.length} foto(s) - ${event.title}`,
+            description:`${sortedIds.length} foto(s) - ${event.title}`,
             externalReference:`event_purchase:${order.id}`,
           }),
         });
