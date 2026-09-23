@@ -7,6 +7,12 @@ const SERVICE=(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'').trim();
 const STALE_MINUTES=20;
 const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization,apikey,content-type','Access-Control-Allow-Methods':'GET,POST,OPTIONS'};
 const j=(body:any,status=200)=>new Response(JSON.stringify(body),{status,headers:{...cors,'Content-Type':'application/json','Cache-Control':'no-store'}});
+const hex=(value:ArrayBuffer)=>Array.from(new Uint8Array(value)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
+
+async function uploadFingerprint(eventId:string,fileName:string,sizeBytes:number){
+  const value=`${eventId}:${fileName}:${Math.max(0,sizeBytes)}`;
+  return`upload:${hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))}`;
+}
 
 async function actor(req:Request){
   const token=(req.headers.get('authorization')||'').replace(/^Bearer\s+/i,'').trim();
@@ -93,8 +99,11 @@ async function maybeStartFace(admin:any,eventId:string,force=false){
 }
 
 async function findExistingPhoto(admin:any,eventId:string,fileName:string,sizeBytes:number){
-  const {data}=await admin.from('photos').select('id,original_storage_path').eq('event_id',eventId).eq('original_filename',fileName).eq('original_bytes',sizeBytes).is('deleted_at',null).order('created_at',{ascending:false}).limit(1).maybeSingle();
-  return data||null;
+  const fingerprint=await uploadFingerprint(eventId,fileName,sizeBytes);
+  const {data:byFingerprint}=await admin.from('photos').select('id,original_storage_path').eq('event_id',eventId).eq('source_file_id',fingerprint).is('deleted_at',null).limit(1).maybeSingle();
+  if(byFingerprint)return byFingerprint;
+  const {data:legacy}=await admin.from('photos').select('id,original_storage_path').eq('event_id',eventId).eq('original_filename',fileName).eq('original_bytes',sizeBytes).is('deleted_at',null).order('created_at',{ascending:false}).limit(1).maybeSingle();
+  return legacy||null;
 }
 
 async function reconcileStale(admin:any,eventId:string){
@@ -236,9 +245,24 @@ Deno.serve(async req=>{
         return j({ok:true,done:true,status:'skipped',photo_id:existing.id,batch:updated});
       }
       if(!photo.public_id||!photo.secure_url)return j({error:'Prévia JPEG não foi confirmada.'},400);
-      const row={event_id:batch.event_id,cloudinary_asset_id:photo.cloudinary_asset_id||null,public_id:String(photo.public_id),secure_url:String(photo.secure_url),width:photo.width||null,height:photo.height||null,bytes:photo.bytes||null,format:photo.format||'jpg',original_filename:item.file_name,status:'published',source_type:'upload',original_storage_provider:photo.original_storage_provider||'supabase',original_storage_backend_id:photo.original_storage_backend_id||null,original_storage_bucket:photo.original_storage_bucket||'photo-originals',original_storage_path:photo.original_storage_path||item.storage_path||null,original_bytes:Number(item.size_bytes||0),original_mime:photo.original_mime||item.mime_type||null,face_index_status:'pending'};
+      const fingerprint=await uploadFingerprint(batch.event_id,item.file_name,Number(item.size_bytes||0));
+      const row={event_id:batch.event_id,cloudinary_asset_id:photo.cloudinary_asset_id||null,public_id:String(photo.public_id),secure_url:String(photo.secure_url),width:photo.width||null,height:photo.height||null,bytes:photo.bytes||null,format:photo.format||'jpg',original_filename:item.file_name,status:'published',source_type:'upload',source_file_id:fingerprint,original_storage_provider:photo.original_storage_provider||'supabase',original_storage_backend_id:photo.original_storage_backend_id||null,original_storage_bucket:photo.original_storage_bucket||'photo-originals',original_storage_path:photo.original_storage_path||item.storage_path||null,original_bytes:Number(item.size_bytes||0),original_mime:photo.original_mime||item.mime_type||null,face_index_status:'pending'};
       const {data:created,error}=await c.admin.from('photos').insert(row).select('id').single();
-      if(error)throw error;
+      if(error){
+        // Duas filas podem concluir o mesmo arquivo quase ao mesmo tempo. O
+        // indice unico por source_file_id escolhe um vencedor; a outra fila
+        // passa a apontar para a foto ja registrada, sem criar duplicata.
+        if(error.code==='23505'){
+          const concurrent=await findExistingPhoto(c.admin,batch.event_id,item.file_name,Number(item.size_bytes||0));
+          if(concurrent){
+            const now=new Date().toISOString();
+            await c.admin.from('upload_batch_items').update({status:'skipped',photo_id:concurrent.id,storage_path:concurrent.original_storage_path||item.storage_path||null,progress_bytes:item.size_bytes,completed_at:now,error_message:null,updated_at:now}).eq('id',item.id);
+            const updated=await recalc(c.admin,batch.id);
+            return j({ok:true,done:true,status:'skipped',photo_id:concurrent.id,batch:updated,concurrent_duplicate:true});
+          }
+        }
+        throw error;
+      }
       const now=new Date().toISOString();
       await c.admin.from('upload_batch_items').update({status:'registered',photo_id:created.id,storage_path:row.original_storage_path,progress_bytes:item.size_bytes,completed_at:now,error_message:null,updated_at:now}).eq('id',item.id);
       const updated=await recalc(c.admin,batch.id);
