@@ -262,10 +262,12 @@ Deno.serve(async request=>{
         .select('id,event_id,status,amount,invoice_url,metadata,items,paid_at')
         .eq('id',orderId)
         .eq('event_id',event.id)
-        .eq('purpose','event_purchase')
+        .in('purpose',['event_purchase','photo_purchase'])
         .maybeSingle();
       if(!order)return j({error:'ORDER_NOT_FOUND'},404);
-      if(await hash(token)!==String(order.metadata?.public_token_hash||''))return j({error:'INVALID_ORDER_TOKEN'},403);
+      const receivedHash=await hash(token);
+      const allowedHashes=[String(order.metadata?.public_token_hash||''),...(Array.isArray(order.metadata?.public_token_hashes)?order.metadata.public_token_hashes.map(String):[])];
+      if(!allowedHashes.includes(receivedHash))return j({error:'INVALID_ORDER_TOKEN'},403);
       return j({
         ok:true,
         order:{

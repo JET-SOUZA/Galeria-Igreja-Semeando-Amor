@@ -27,8 +27,9 @@ async function visitorCanDownload(admin:any,input:any,photoId:string,event:any){
     .maybeSingle();
   if(!o||o.status!=='paid'||!['event_purchase','photo_purchase'].includes(String(o.purpose||'')))return false;
   if(String(o.event_id)!==String(event.id)||String(o.organization_id)!==String(event.organization_id))return false;
-  const expected=String(o.metadata?.public_token_hash||o.metadata?.access_token_hash||'');
-  if(!expected||await hash(token)!==expected)return false;
+  const receivedHash=await hash(token);
+  const allowedHashes=[String(o.metadata?.public_token_hash||o.metadata?.access_token_hash||''),...(Array.isArray(o.metadata?.public_token_hashes)?o.metadata.public_token_hashes.map(String):[])];
+  if(!allowedHashes.includes(receivedHash))return false;
   const itemIds=Array.isArray(o.items)?o.items.map((x:any)=>String(x?.photo_id||x?.id||'')):[];
   const legacyIds=Array.isArray(o.metadata?.photo_ids)?o.metadata.photo_ids.map((x:any)=>String(x)):[];
   return [...itemIds,...legacyIds].includes(photoId);

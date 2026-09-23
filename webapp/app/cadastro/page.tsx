@@ -27,6 +27,7 @@ const defaults:any[]=[
  {field_key:'neighborhood',label:'Bairro',field_type:'text',is_required:true,sort_order:80,width:'half'},
  {field_key:'city',label:'Cidade',field_type:'text',is_required:true,sort_order:90,width:'half'},
  {field_key:'has_solar',label:'Possui energia solar?',field_type:'select',is_required:true,sort_order:100,width:'full',options:[{value:'yes',label:'Sim'},{value:'no',label:'Não'}]},
+ {field_key:'average_energy_bill',label:'Qual valor médio você paga na conta de luz atualmente?',field_type:'number',placeholder:'Ex.: 350',help_text:'Informe o valor aproximado em reais.',is_required:true,sort_order:105,width:'full'},
  {field_key:'privacy',label:'Política de Privacidade',field_type:'checkbox',is_required:true,sort_order:110,width:'full'},
  {field_key:'marketing_consent',label:'Consentimento de marketing',field_type:'checkbox',is_required:false,sort_order:120,width:'full'},
 ];
@@ -96,7 +97,7 @@ export default function Cadastro(){
  },[config]);
 
  function destination(){return next.startsWith('/')?next:'/'}
- function storeVisitor(visitor:any){
+ function storeVisitor(visitor:any,purchases:any[]=[]){
   localStorage.setItem('semeando_visitor',JSON.stringify({
    id:visitor.id,
    full_name:visitor.full_name,
@@ -104,6 +105,10 @@ export default function Cadastro(){
    registered_at:new Date().toISOString(),
    marketing_consent:!!visitor.marketing_consent,
   }));
+  if(eventSlug&&purchases.length){
+   localStorage.setItem(`semeando_paid_orders:${eventSlug}`,JSON.stringify(purchases));
+   localStorage.setItem(`semeando_paid_order:${eventSlug}`,JSON.stringify(purchases[0]));
+  }
  }
  function changeMode(nextMode:AccessMode){
   setMode(nextMode);
@@ -143,7 +148,7 @@ export default function Cadastro(){
    });
    const data=await response.json();
    if(!response.ok)throw new Error(data.error||'Não foi possível recuperar o acesso.');
-   storeVisitor(data.visitor);
+   storeVisitor(data.visitor,data.purchases||[]);
    location.replace(destination());
   }catch(caught:any){
    setError(caught.message||'Não foi possível recuperar o acesso.');
@@ -171,10 +176,10 @@ export default function Cadastro(){
   setBusy(true);
   try{
    const payload:any={organization_id:org?.id,event_slug:eventSlug||undefined,source_event_id:config?.event?.id||undefined,privacy:!!values.privacy,marketing_consent:!!values.marketing_consent,custom_fields:{}};
-   const known=new Set(['full_name','email','cpf','birth_date','housing_type','street','neighborhood','city','whatsapp','has_solar']);
+   const known=new Set(['full_name','email','cpf','birth_date','housing_type','street','neighborhood','city','whatsapp','has_solar','average_energy_bill']);
    for(const [key,value] of Object.entries(values)){
     if(['privacy','marketing_consent'].includes(key))continue;
-    if(known.has(key))payload[key]=key==='cpf'||key==='whatsapp'?onlyDigits(String(value)):key==='has_solar'?value==='yes':value;
+    if(known.has(key))payload[key]=key==='cpf'||key==='whatsapp'?onlyDigits(String(value)):key==='has_solar'?value==='yes':key==='average_energy_bill'?Number(value):value;
     else payload.custom_fields[key]=value;
    }
    const response=await fetch(`${SB}/functions/v1/visitor-register`,{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -183,7 +188,7 @@ export default function Cadastro(){
     const duplicate=String(data.code||'').startsWith('DUPLICATE_');
     throw new Error(`${data.error||'Não foi possível concluir o cadastro.'}${duplicate?' Use “Já tenho cadastro” para entrar.':''}`);
    }
-   storeVisitor(data.visitor);
+   storeVisitor(data.visitor,data.purchases||[]);
    location.replace(destination());
   }catch(caught:any){
    setError(caught.message||'Erro inesperado.');

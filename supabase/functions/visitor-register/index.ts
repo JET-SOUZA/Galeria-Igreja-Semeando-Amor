@@ -15,6 +15,8 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const DDDS = new Set(['11','12','13','14','15','16','17','18','19','21','22','24','27','28','31','32','33','34','35','37','38','41','42','43','44','45','46','47','48','49','51','53','54','55','61','62','63','64','65','66','67','68','69','71','73','74','75','77','79','81','82','83','84','85','86','87','88','89','91','92','93','94','95','96','97','98','99']);
 
 const digits = (value: string) => value.replace(/\D/g, '');
+const hex = (value: ArrayBuffer) => Array.from(new Uint8Array(value)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+const hash = async (value: string) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
 const canonicalPhone = (value: string) => digits(value).replace(/^55(?=\d{10,11}$)/, '');
 const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(value);
 const validName = (value: string) => {
@@ -55,6 +57,39 @@ function duplicateResponse(cpf: boolean, whatsapp: boolean) {
   }, 409);
   if (cpf) return json({ error: 'Já existe um cliente cadastrado com este CPF.', code: 'DUPLICATE_CPF', field: 'cpf' }, 409);
   return json({ error: 'Já existe um cliente cadastrado com este celular.', code: 'DUPLICATE_WHATSAPP', field: 'whatsapp' }, 409);
+}
+
+async function restorePurchases(admin: any, visitorId: string, eventId: string) {
+  const { data: orders, error } = await admin
+    .from('payment_orders')
+    .select('id,metadata')
+    .eq('visitor_id', visitorId)
+    .eq('event_id', eventId)
+    .eq('status', 'paid')
+    .in('purpose', ['event_purchase', 'photo_purchase'])
+    .order('paid_at', { ascending: false });
+  if (error) throw error;
+  const purchases = [];
+  for (const order of orders || []) {
+    const accessToken = crypto.randomUUID() + crypto.randomUUID();
+    const tokenHash = await hash(accessToken);
+    const previousHashes = Array.isArray(order.metadata?.public_token_hashes)
+      ? order.metadata.public_token_hashes.map(String)
+      : [];
+    const metadata = {
+      ...(order.metadata || {}),
+      public_token_hashes: [...new Set([...previousHashes, tokenHash])],
+      access_restored_at: new Date().toISOString(),
+    };
+    const { error: updateError } = await admin
+      .from('payment_orders')
+      .update({ metadata, updated_at: new Date().toISOString() })
+      .eq('id', order.id)
+      .eq('visitor_id', visitorId);
+    if (updateError) throw updateError;
+    purchases.push({ order_id: order.id, access_token: accessToken });
+  }
+  return purchases;
 }
 
 Deno.serve(async (req) => {
@@ -154,6 +189,7 @@ Deno.serve(async (req) => {
         );
       if (linkError) throw linkError;
 
+      const purchases = await restorePurchases(admin, visitor.id, sourceEventId);
       return json({
         ok: true,
         resumed: true,
@@ -164,6 +200,7 @@ Deno.serve(async (req) => {
           full_name: visitor.full_name,
           marketing_consent: visitor.marketing_consent,
         },
+        purchases,
       });
     }
     if (action !== 'register') return json({ error: 'Ação inválida.' }, 400);
@@ -225,16 +262,20 @@ Deno.serve(async (req) => {
         { visitor_id: sameExistingVisitor.id, consent_type: 'privacy_terms', accepted: true, policy_version: '1.2', user_agent: userAgent },
         { visitor_id: sameExistingVisitor.id, consent_type: 'marketing', accepted: !!body.marketing_consent, policy_version: '1.2', user_agent: userAgent },
       ]);
+      const purchases = sourceEventId
+        ? await restorePurchases(admin, sameExistingVisitor.id, sourceEventId)
+        : [];
       return json({
         ok: true,
         resumed: true,
         message: 'Este cliente já estava cadastrado. O acesso existente foi recuperado com segurança.',
         visitor: sameExistingVisitor,
+        purchases,
       });
     }
     if (cpfLookup.data || whatsappLookup.data) return duplicateResponse(!!cpfLookup.data, !!whatsappLookup.data);
 
-    const known = new Set(['organization_id','full_name','housing_type','street','neighborhood','city','whatsapp','email','cpf','birth_date','has_solar','privacy','marketing_consent','custom_fields','source_type','source_label','source_event_id','event_id','event_slug','source_campaign','utm_source','utm_medium','utm_campaign','utm_content','utm_term','referrer','landing_path']);
+    const known = new Set(['organization_id','full_name','housing_type','street','neighborhood','city','whatsapp','email','cpf','birth_date','has_solar','average_energy_bill','privacy','marketing_consent','custom_fields','source_type','source_label','source_event_id','event_id','event_slug','source_campaign','utm_source','utm_medium','utm_campaign','utm_content','utm_term','referrer','landing_path']);
     const custom: Record<string, unknown> = { ...(body.custom_fields || {}) };
     for (const field of fields || []) if (!known.has(field.field_key) && field.field_key in body) custom[field.field_key] = body[field.field_key];
 
@@ -265,6 +306,11 @@ Deno.serve(async (req) => {
     if (cpf) payload.cpf = cpf;
     if (birthDate) payload.birth_date = birthDate;
     if (typeof body.has_solar === 'boolean') payload.has_solar = body.has_solar;
+    if (body.average_energy_bill !== undefined && body.average_energy_bill !== '') {
+      const averageEnergyBill = Number(body.average_energy_bill);
+      if (!Number.isFinite(averageEnergyBill) || averageEnergyBill < 0) return json({ error: 'Informe um valor válido para a conta de luz.' }, 400);
+      payload.average_energy_bill = averageEnergyBill;
+    }
 
     const { data: visitor, error: insertError } = await admin.from('visitors').insert(payload).select('id,full_name,email,marketing_consent,source_type,source_label,source_event_id,utm_source,utm_campaign').single();
     if (insertError || !visitor) {
