@@ -98,5 +98,7 @@ $$;
 
 revoke all on function public.storage_backend_usage(uuid) from public;
 revoke all on function public.event_storage_backend_usage(uuid, uuid) from public;
+revoke all on function public.storage_backend_usage(uuid) from anon, authenticated;
+revoke all on function public.event_storage_backend_usage(uuid, uuid) from anon, authenticated;
 grant execute on function public.storage_backend_usage(uuid) to service_role;
 grant execute on function public.event_storage_backend_usage(uuid, uuid) to service_role;
