@@ -35,9 +35,11 @@ export async function requireActiveAdminAccess(opts:{redirect?:boolean}={redirec
       return null;
     }
     throw new Error(d?.error||'Não foi possível validar o acesso.');
-  }catch(e){
-    // Em falha transitória de rede, preserva a sessão; as RLS continuam protegendo os dados.
-    return {session:s,accessCheckUnavailable:true,error:e};
+  }catch{
+    // Falha fechada: uma sessão existente não basta para liberar a interface administrativa.
+    // A sessão é preservada para permitir uma nova tentativa quando a rede voltar.
+    if(opts.redirect&&typeof window!=='undefined')location.href='/admin/login?reason=validation_unavailable';
+    return null;
   }
 }
 export async function adminHeaders(json=true){const s=await session();return {apikey:KEY,Authorization:`Bearer ${s?.access_token||''}`,...(json?{'Content-Type':'application/json'}:{})}}
