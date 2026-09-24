@@ -2,11 +2,12 @@
 import {useEffect,useState} from 'react';
 import {CHURCH_LOGO,DEVELOPER_LOGO,DEVELOPER_NAME,DEVELOPER_TAGLINE} from './brand';
 import {SB,KEY} from '../lib/sb';
+import {readVisitorSession} from '../lib/visitor-session';
 type Ev={id:string;title:string;slug:string;event_date?:string;location?:string;cover_url?:string;face_search_enabled:boolean;is_paid:boolean;organization_name?:string;organization_logo?:string};
 export default function Home(){
  const [events,setEvents]=useState<Ev[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState('');
  useEffect(()=>{const authHash=new URLSearchParams(location.hash.replace(/^#/,'')),authType=authHash.get('type');if(authHash.get('access_token')&&(authType==='invite'||authType==='recovery')){location.replace(`/admin/primeiro-acesso${location.hash}`);return}(async()=>{try{localStorage.removeItem('semeando_private_gallery_access');const r=await fetch(`${SB}/functions/v1/gallery-catalog`,{headers:{apikey:KEY}}),d=await r.json();if(!r.ok)throw Error(d.error||'Não foi possível carregar as galerias.');setEvents(d.events||[])}catch(e:any){setError(e.message)}finally{setLoading(false)}})()},[]);
- function openEvent(slug:string){let visitor=null;try{visitor=JSON.parse(localStorage.getItem('semeando_visitor')||'null')}catch{}location.href=visitor?.id?`/evento/${slug}`:`/cadastro?next=${encodeURIComponent(`/evento/${slug}`)}`}
+ function openEvent(slug:string){const visitor=readVisitorSession();location.href=visitor?.id?`/evento/${slug}`:`/cadastro?next=${encodeURIComponent(`/evento/${slug}`)}`}
  return <main className="landing">
   <header className="home-nav"><a className="brand-lockup" href="/"><img src={CHURCH_LOGO} alt="Legacy Semeando Memórias"/><div><strong>Legacy Semeando Memórias</strong><span>Galerias de eventos</span></div></a><a className="admin-link" href="/acesso">Acesso da gestão</a></header>
   <section className="home-hero"><div className="hero-copy"><span className="hero-kicker">GALERIAS PÚBLICAS DA PLATAFORMA</span><h1>Seus momentos.<br/><em>Seu legado em imagens.</em></h1><p>Encontre galerias públicas de eventos em um único lugar. Álbuns privados aparecem somente para quem recebe o link exclusivo do responsável.</p><div className="hero-actions"><a className="btn hero-primary" href="#eventos">Acessar galerias públicas</a><a className="hero-secondary" href="#como">Como funciona ↓</a></div><div className="hero-trust"><span>✓ Cadastro gratuito</span><span>✓ Busca facial com consentimento</span><span>✓ Álbuns privados protegidos por link</span></div></div>

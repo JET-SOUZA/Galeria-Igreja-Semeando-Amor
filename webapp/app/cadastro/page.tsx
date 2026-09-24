@@ -3,6 +3,7 @@
 import {FormEvent,useEffect,useMemo,useState} from 'react';
 import {CHURCH_LOGO,DEVELOPER_LOGO,DEVELOPER_NAME} from '../brand';
 import {SB,KEY} from '../../lib/sb';
+import {clearVisitorSession,readVisitorSession,writeVisitorSession} from '../../lib/visitor-session';
 import styles from './cadastro.module.css';
 
 type AccessMode='recover'|'register';
@@ -48,17 +49,15 @@ export default function Cadastro(){
 
  useEffect(()=>{
   if(reason==='session'){
-   localStorage.removeItem('semeando_visitor');
+   clearVisitorSession();
    setMode('recover');
    setError('Seu acesso neste aparelho expirou. Entre novamente abaixo; o carrinho continua salvo.');
   }else{
-   try{
-    const visitor=JSON.parse(localStorage.getItem('semeando_visitor')||'null');
-    if(visitor?.id){
-     location.replace(next.startsWith('/')?next:'/');
-     return;
-    }
-   }catch{}
+   const visitor=readVisitorSession();
+   if(visitor?.id){
+    location.replace(next.startsWith('/')?next:'/');
+    return;
+   }
   }
   (async()=>{
    try{
@@ -101,13 +100,13 @@ export default function Cadastro(){
 
  function destination(){return next.startsWith('/')?next:'/'}
  function storeVisitor(visitor:any,purchases:any[]=[]){
-  localStorage.setItem('semeando_visitor',JSON.stringify({
+  writeVisitorSession({
    id:visitor.id,
    full_name:visitor.full_name,
    organization_id:visitor.organization_id||org?.id,
    registered_at:new Date().toISOString(),
    marketing_consent:!!visitor.marketing_consent,
-  }));
+  });
   if(eventSlug&&purchases.length){
    localStorage.setItem(`semeando_paid_orders:${eventSlug}`,JSON.stringify(purchases));
    localStorage.setItem(`semeando_paid_order:${eventSlug}`,JSON.stringify(purchases[0]));
