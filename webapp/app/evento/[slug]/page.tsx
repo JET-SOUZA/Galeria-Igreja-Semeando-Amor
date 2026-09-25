@@ -38,6 +38,7 @@ export default function EventPage({params}:{params:{slug:string}}){
  async function downloadFreeSelected(){
   const selected=matches.filter(p=>freeSelection.includes(p.id));
   if(!selected.length)return;
+  // Safari no iPhone exige interação individual para downloads múltiplos.
   const appleMobile=/iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
   if(appleMobile&&selected.length>1){setBulkOpen(true);return}
   setBulkDownloading(true);
