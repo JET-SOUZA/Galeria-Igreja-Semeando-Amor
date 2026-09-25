@@ -3,7 +3,7 @@ import {ChangeEvent,useEffect,useMemo,useState} from 'react';
 import {SB,KEY,money,readSession} from '../../../lib/sb';
 import {isHeicImage,prepareFaceImage} from '../../../lib/face-image';
 import {readVisitorSession} from '../../../lib/visitor-session';
-type Photo={id:string;secure_url?:string;original_url?:string;thumbnail_url?:string;display_url?:string;preview_url?:string;original_filename?:string;similarity?:number};
+type Photo={id:string;secure_url?:string;original_url?:string;original_access_token?:string;thumbnail_url?:string;display_url?:string;preview_url?:string;original_filename?:string;similarity?:number};
 const roleLabel:Record<string,string>={administrator:'Administrador',manager:'Gerente',photographer:'Fotógrafo',attendant:'Atendente'};
 const PAGE=24;
 export default function EventPage({params}:{params:{slug:string}}){
@@ -12,7 +12,26 @@ export default function EventPage({params}:{params:{slug:string}}){
  const shownMatches=useMemo(()=>matches.slice(0,visible),[matches,visible]);
  async function choose(e:ChangeEvent<HTMLInputElement>){const f=e.target.files?.[0];e.target.value='';if(!f)return;if(!f.type.startsWith('image/')&&!/\.(heic|heif|jpg|jpeg|png|webp)$/i.test(f.name)){setFaceMsg('Escolha um arquivo de imagem válido.');return}if(f.size>25*1024*1024){setFaceMsg('A imagem é muito grande. Escolha uma foto com até 25 MB.');return}if(preview.startsWith('blob:'))URL.revokeObjectURL(preview);const objectUrl=URL.createObjectURL(f);setPreview(objectUrl);setImage('');setPreparing(true);setFaceMsg('Preparando sua foto...');setMatches([]);setFreeSelection([]);setVisible(PAGE);try{const heic=await isHeicImage(f);if(heic)setFaceMsg('Convertendo a foto do iPhone...');const url=await prepareFaceImage(f,heic);setImage(url);setPreview(url);URL.revokeObjectURL(objectUrl);setFaceMsg('Foto pronta. Confira o rosto e toque em “Buscar minhas fotos”.')}catch(err){console.error(err);setImage('');setFaceMsg('Não conseguimos ler esta imagem. Tente outra foto ou tire uma nova selfie com a câmera aberta.')}finally{setPreparing(false)}}
  async function faceSearch(){if(!image||!consent||preparing)return;const started=performance.now();setSearching(true);setSearchMs(null);setFaceMsg('Buscando suas fotos...');setMatches([]);setFreeSelection([]);setVisible(PAGE);try{const r=await fetch(`${SB}/functions/v1/face-search`,{method:'POST',headers:{apikey:KEY,'Content-Type':'application/json'},body:JSON.stringify({event_slug:params.slug,image_base64:image,consent:true,visitor_id:visitor?.id||null})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Não foi possível fazer a busca.');const found=d.photos||[];setMatches(found);setSearchMs(Math.max(.1,(performance.now()-started)/1000));setFaceMsg(found.length?`${found.length} foto(s) encontrada(s). As miniaturas carregam primeiro para você navegar mais rápido.`:'Não encontramos fotos deste rosto neste evento. Tente outra imagem com o rosto bem visível.');if(found.length){setFaceOpen(false);setTimeout(()=>document.getElementById('minhas-fotos')?.scrollIntoView({behavior:'smooth',block:'start'}),100)}}catch(e:any){setFaceMsg(e.message)}finally{setSearching(false)}}
- async function downloadPhoto(p:Photo){const src=p.original_url||p.secure_url;if(!src)return;setDownloading(p.id);try{const r=await fetch(src);if(!r.ok)throw new Error('download');const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=p.original_filename||`semeando-memorias-${p.id}.jpg`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}catch{window.open(src,'_blank','noopener,noreferrer')}finally{setDownloading(null)}}
+ async function downloadPhoto(p:Photo){
+  setDownloading(p.id);
+  try{
+   const admin=readSession();
+   const headers:Record<string,string>={apikey:KEY,'Content-Type':'application/json'};
+   if(admin?.access_token)headers.Authorization=`Bearer ${admin.access_token}`;
+   const r=await fetch(`${SB}/functions/v1/photo-original-access`,{method:'POST',headers,body:JSON.stringify({photo_id:p.id,face_access_token:p.original_access_token||undefined})});
+   const d=await r.json().catch(()=>({}));
+   if(!r.ok||!d.url)throw new Error(d.error||'Não foi possível preparar o arquivo original.');
+   const a=document.createElement('a');
+   a.href=d.url;
+   a.download=d.filename||p.original_filename||`semeando-memorias-${p.id}`;
+   a.rel='noopener';
+   document.body.appendChild(a);
+   a.click();
+   a.remove();
+  }catch(error:any){
+   alert(error?.message||'Não foi possível baixar a foto. Tente novamente.');
+  }finally{setDownloading(null)}
+ }
  function toggleFree(id:string){setFreeSelection(v=>v.includes(id)?v.filter(x=>x!==id):[...v,id])}
  async function downloadFreeSelected(){const selected=matches.filter(p=>freeSelection.includes(p.id));if(!selected.length)return;setBulkDownloading(true);for(const p of selected){await downloadPhoto(p);await new Promise(r=>setTimeout(r,250))}setBulkDownloading(false)}
  function clearSelectedImage(){if(preview.startsWith('blob:'))URL.revokeObjectURL(preview);setPreview('');setImage('');setPreparing(false);setMatches([]);setFreeSelection([]);setVisible(PAGE);setSearchMs(null);setFaceMsg('')}
