@@ -103,6 +103,8 @@ export default function MassUpload({params}:{params:{slug:string}}){
   const[files,setFiles]=useState<File[]>([]);
   const[loading,setLoading]=useState(true);
   const[running,setRunning]=useState(false);
+  const[extractingZip,setExtractingZip]=useState(false);
+  const zipBusyRef=useRef(false);
   const[paused,setPaused]=useState(false);
   const[msg,setMsg]=useState('');
   const[done,setDone]=useState(0);
@@ -198,10 +200,15 @@ export default function MassUpload({params}:{params:{slug:string}}){
   const fileOk=!backend?.max_file_bytes||stats.max<=backend.max_file_bytes;
   const backendOk=!!backend?.active&&!['blocked','configuration_required'].includes(backend?.status||'');
   const providerOk=['supabase','r2','s3'].includes(backend?.provider||'');
-  const ready=files.length>0&&rejected.length===0&&capacityOk&&fileOk&&backendOk&&providerOk;
+  const ready=!extractingZip&&files.length>0&&rejected.length===0&&capacityOk&&fileOk&&backendOk&&providerOk;
 
   function pick(e:React.ChangeEvent<HTMLInputElement>){
     const selected=Array.from(e.target.files||[]);
+    e.target.value='';
+    addFiles(selected);
+  }
+
+  function addFiles(selected:File[]){
     const blocked:RejectedFile[]=[];
     const accepted:File[]=[];
     const ignoredNow:RejectedFile[]=[];
@@ -243,7 +250,40 @@ export default function MassUpload({params}:{params:{slug:string}}){
     setMsg(notes.join(' ')||'Nenhuma imagem compatível foi selecionada.');
     setPaused(false);
     stopRef.current=false;
+  }
+
+  async function pickZip(e:React.ChangeEvent<HTMLInputElement>){
+    const archives=Array.from(e.target.files||[]);
     e.target.value='';
+    if(!archives.length||zipBusyRef.current||running)return;
+    zipBusyRef.current=true;
+    setExtractingZip(true);
+    try{
+      const {default:JSZip}=await import('jszip');
+      const extracted:File[]=[];
+      for(const archive of archives){
+        setMsg(`Abrindo ${archive.name}...`);
+        const zip=await JSZip.loadAsync(await archive.arrayBuffer());
+        const entries=Object.values(zip.files).filter(entry=>!entry.dir&&!entry.name.startsWith('__MACOSX/')&&!entry.name.split('/').pop()?.startsWith('._'));
+        for(let index=0;index<entries.length;index++){
+          const entry=entries[index];
+          if(!ACCEPTED_EXT.test(entry.name)&&!RAW_EXT.test(entry.name))continue;
+          setMsg(`Extraindo ${archive.name}: ${index+1} de ${entries.length} arquivos...`);
+          const blob=await entry.async('blob');
+          const name=entry.name.split('/').pop()||entry.name;
+          const extension=name.split('.').pop()?.toLowerCase()||'';
+          const types:Record<string,string>={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif',avif:'image/avif',tif:'image/tiff',tiff:'image/tiff'};
+          const file=new File([blob],name,{type:types[extension]||'application/octet-stream',lastModified:entry.date.getTime()});
+          Object.defineProperty(file,'webkitRelativePath',{value:entry.name});
+          extracted.push(file);
+          await sleep(0);
+        }
+      }
+      if(!extracted.length)throw Error('O ZIP não contém fotos compatíveis.');
+      addFiles(extracted);
+    }catch(error:any){
+      setMsg(`Não foi possível abrir o ZIP: ${error?.message||'arquivo inválido ou incompleto'}. A seleção anterior foi mantida.`);
+    }finally{zipBusyRef.current=false;setExtractingZip(false)}
   }
 
   async function entitlementCheck(count:number,total:number){
@@ -442,7 +482,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
     <header><div><a href={`/admin/evento/${params.slug}/fotos`}>← Gerenciar fotos</a><span>UPLOAD DE FOTOS</span><h1>{event?.title||'Evento grande'}</h1><p>Envie milhares de fotos com retomada e tentativas automáticas.</p></div><a className="secondary" href={`/evento/${params.slug}`}>Ver galeria</a></header>
     {msg&&<div className="notice">{msg}</div>}
     <section className="readiness"><div className="head"><div><span>DISPONIBILIDADE DO ENVIO</span><h2>{loading?'Verificando o sistema...':backendOk&&providerOk?'Tudo pronto para receber suas fotos':'Envio temporariamente indisponível'}</h2></div><b className={`state ${backendOk&&providerOk?'ok':'bad'}`}>{loading?'VERIFICANDO':backendOk&&providerOk?'PRONTO':'NÃO LIBERADO'}</b></div>{!loading&&backendOk&&providerOk&&<p className="readyCopy">Os originais serão preservados e o envio poderá ser retomado se a conexão cair.</p>}{backend?.message&&<p className="warning">⚠ {backend.message}</p>}</section>
-    <section className="picker"><div className="pickerHead"><div><span>01 • SELECIONAR FOTOS</span><h2>Monte a fila em partes</h2><p>A fila aceita milhares de fotos. No iPhone, adicione até {SAFE_PICK_SIZE} por seleção e repita: todas ficam reunidas na mesma fila para um único envio. O seletor do iPhone não informa a quantidade enquanto você marca; depois de tocar em <b>Abrir</b>, confirme a rodada e o total abaixo.</p><p className="iphoneNote"><b>Original preservado:</b> para conservar o HEIC exato, salve/exporte no app Arquivos e selecione por lá. A Fototeca pode entregar uma cópia JPEG ao navegador.</p></div><div className="pickButtons"><label>＋ Adicionar fotos{files.length>0&&<b> • {files.length.toLocaleString('pt-BR')} na fila</b>}<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" onChange={pick}/></label><label className="folder">▣ Adicionar pasta<input hidden type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" {...({webkitdirectory:'',directory:''} as any)} onChange={pick}/></label>{files.length>0&&!running&&<button className="clear" onClick={()=>{setFiles([]);setFailures([]);setRejected([]);setIgnoredFiles([]);setPickSummary(null);setMsg('Fila local limpa. Nenhuma foto já enviada foi apagada.')}}>Limpar seleção local</button>}</div></div>{files.length>0&&<div className="selectionCount" aria-live="polite"><div><small>TOTAL NA FILA</small><strong>{files.length.toLocaleString('pt-BR')}</strong><em>fotos</em></div>{pickSummary&&<><div><small>ÚLTIMA RODADA</small><strong>{pickSummary.received.toLocaleString('pt-BR')}</strong><em>arquivos recebidos</em></div><div><small>NOVAS</small><strong>{pickSummary.added.toLocaleString('pt-BR')}</strong><em>adicionadas</em></div><div><small>DUPLICADAS</small><strong>{pickSummary.duplicates.toLocaleString('pt-BR')}</strong><em>ignoradas</em></div></>}<p>Próximo marco: <b>{(Math.floor(files.length/SAFE_PICK_SIZE)+1)*SAFE_PICK_SIZE}</b> — faltam {((Math.floor(files.length/SAFE_PICK_SIZE)+1)*SAFE_PICK_SIZE-files.length).toLocaleString('pt-BR')} fotos.</p></div>}</section>
+    <section className="picker"><div className="pickerHead"><div><span>01 • SELECIONAR FOTOS</span><h2>Monte a fila em partes</h2><p>A fila aceita milhares de fotos. No iPhone, adicione até {SAFE_PICK_SIZE} por seleção e repita: todas ficam reunidas na mesma fila para um único envio. O seletor do iPhone não informa a quantidade enquanto você marca; depois de tocar em <b>Abrir</b>, confirme a rodada e o total abaixo.</p><p className="iphoneNote"><b>Original preservado:</b> para conservar o HEIC exato, salve/exporte no app Arquivos e selecione por lá. A Fototeca pode entregar uma cópia JPEG ao navegador.</p></div><div className="pickButtons"><label>＋ Adicionar fotos{files.length>0&&<b> • {files.length.toLocaleString('pt-BR')} na fila</b>}<input hidden type="file" disabled={extractingZip} multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" onChange={pick}/></label><label className="folder">▣ Adicionar pasta<input hidden type="file" disabled={extractingZip} multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" {...({webkitdirectory:'',directory:''} as any)} onChange={pick}/></label><label className="folder">{extractingZip?'Extraindo ZIP...':'▣ Adicionar ZIP'}<input hidden type="file" multiple accept=".zip,application/zip" disabled={extractingZip||running} onChange={pickZip}/></label>{files.length>0&&!running&&!extractingZip&&<button className="clear" onClick={()=>{setFiles([]);setFailures([]);setRejected([]);setIgnoredFiles([]);setPickSummary(null);setMsg('Fila local limpa. Nenhuma foto já enviada foi apagada.')}}>Limpar seleção local</button>}</div></div>{files.length>0&&<div className="selectionCount" aria-live="polite"><div><small>TOTAL NA FILA</small><strong>{files.length.toLocaleString('pt-BR')}</strong><em>fotos</em></div>{pickSummary&&<><div><small>ÚLTIMA RODADA</small><strong>{pickSummary.received.toLocaleString('pt-BR')}</strong><em>arquivos recebidos</em></div><div><small>NOVAS</small><strong>{pickSummary.added.toLocaleString('pt-BR')}</strong><em>adicionadas</em></div><div><small>DUPLICADAS</small><strong>{pickSummary.duplicates.toLocaleString('pt-BR')}</strong><em>ignoradas</em></div></>}<p>Próximo marco: <b>{(Math.floor(files.length/SAFE_PICK_SIZE)+1)*SAFE_PICK_SIZE}</b> — faltam {((Math.floor(files.length/SAFE_PICK_SIZE)+1)*SAFE_PICK_SIZE-files.length).toLocaleString('pt-BR')} fotos.</p></div>}</section>
     {(files.length>0||rejected.length>0||ignoredFiles.length>0)&&<><section className="analysis"><div className="analysisTitle"><div><span>02 • ANÁLISE DO LOTE</span><h2>{files.length.toLocaleString('pt-BR')} fotos • {bytes(stats.total)}</h2><small>Arquivos recebidos preservados sem recompressão • prévias somadas de até {bytes(stats.previewCap)}</small></div><b className={`state ${ready?'ok':'bad'}`}>{ready?'PRONTO PARA INICIAR':'BLOQUEADO'}</b></div><div className="checks"><article className={fileOk?'okc':'badc'}><b>{fileOk?'✓':'!'}</b><div><strong>Maior arquivo</strong><small>{bytes(stats.max)} {backend?.max_file_bytes?`de ${bytes(backend.max_file_bytes)} permitidos`:''}</small></div></article><article className={capacityOk?'okc':'badc'}><b>{capacityOk?'✓':'!'}</b><div><strong>Capacidade</strong><small>{capacityOk?'Há espaço disponível para este lote.':'Este lote ultrapassa o espaço disponível no momento.'}</small></div></article><article className={backendOk&&providerOk?'okc':'badc'}><b>{backendOk&&providerOk?'✓':'!'}</b><div><strong>Sistema</strong><small>{backendOk&&providerOk?'Pronto para receber as fotos.':'O envio ainda precisa ser liberado.'}</small></div></article><article className={rejected.length===0?'okc':'badc'}><b>{rejected.length===0?'✓':'!'}</b><div><strong>Formatos</strong><small>{rejected.length===0?'Todas as fotos são compatíveis.':`${rejected.length} arquivo(s) exige(m) conversão.`}</small></div></article><article className="okc"><b>3</b><div><strong>Concorrência controlada</strong><small>3 originais e 1 prévia pesada por vez.</small></div></article></div>{rejected.length>0&&<div className="rejected"><b>Converta estes arquivos antes de iniciar:</b>{rejected.slice(0,20).map((x,i)=><p key={`${x.name}-${i}`}><strong>{x.name}</strong> — {x.reason}</p>)}{rejected.length>20&&<p>… e mais {rejected.length-20} arquivo(s).</p>}</div>}{ignoredFiles.length>0&&<details className="ignored"><summary>{ignoredFiles.length.toLocaleString('pt-BR')} arquivo(s) que não são imagem foram ignorados — ver nomes</summary>{ignoredFiles.slice(0,50).map((x,i)=><p key={`${x.name}-${i}`}><strong>{x.name}</strong> — {x.reason}</p>)}{ignoredFiles.length>50&&<p>… e mais {ignoredFiles.length-50} arquivo(s).</p>}</details>}<div className="actions"><button className="primary" disabled={!ready||running} onClick={()=>run()}>{running?'Processando...':'▶ Iniciar upload'}</button>{running&&<button className="secondary" onClick={pause}>Ⅱ Pausar após atuais</button>}{failures.length>0&&!running&&<button className="retry" onClick={retry}>↻ Tentar {failures.length} falha(s) novamente</button>}</div></section>
     <section className="progress"><div className="barHead"><div><span>PROGRESSO REAL</span><b>{done.toLocaleString('pt-BR')} de {files.length.toLocaleString('pt-BR')}</b></div><strong>{pct}%</strong></div><div className="bar"><i style={{width:`${pct}%`}}/></div><div className="progressStats"><span>↑ {Math.max(serverProgress.sent,done)} enviados</span><span>✓ {Math.max(serverProgress.processed,done)} processados</span><span>… {Math.max(serverProgress.pending,files.length-done-failed-Object.keys(active).length)} pendentes</span><span>! {Math.max(serverProgress.errors,failed)} com erro</span><span>↻ {Object.keys(active).length} em andamento</span></div>{Object.entries(active).length>0&&<div className="activeList">{Object.entries(active).map(([k,a])=><div key={k}><span title={a.name}>{a.name}<small>{a.stage}</small></span><b>{a.pct}%</b></div>)}</div>}{failures.length>0&&<details><summary>Ver falhas desta sessão ({failures.length})</summary>{failures.slice(0,50).map((x,i)=><p key={i}><b>{x.file.name}</b> — {x.error}</p>)}</details>}</section></>}
     <section className="history"><div><span>ÚLTIMOS LOTES</span><h2>Histórico do evento</h2></div>{batches.length?<div className="batchList">{batches.map(b=><button key={b.id} onClick={()=>load(b.id)}><span>{new Date(b.created_at).toLocaleString('pt-BR')}</span><b>{b.completed_files}/{b.total_files}</b><em className={b.status}>{b.status}</em><small>{bytes(Number(b.total_bytes||0))}</small></button>)}</div>:<p>Nenhum lote registrado ainda.</p>}</section>
