@@ -50,6 +50,35 @@ async function eventBySlug(admin:any,slug:string){
   return event;
 }
 
+async function financeByOrganization(admin:any,organizationId:string){
+  const {data,error}=await admin
+    .from('organization_finance_settings')
+    .select('payment_provider,provider_wallet_id,provider_status,payment_enabled,platform_fee_percent,settlement_mode')
+    .eq('organization_id',organizationId)
+    .maybeSingle();
+  if(error)throw error;
+  return data||null;
+}
+
+function splitConfiguration(finance:any,eventId:string){
+  const requiresSplit=finance?.payment_provider==='asaas'&&finance?.settlement_mode==='provider_split';
+  if(!requiresSplit)return {requiresSplit:false,ready:true,split:undefined,beneficiaryPercent:0};
+  const fee=Math.max(0,Math.min(100,Number(finance?.platform_fee_percent||0)));
+  const beneficiaryPercent=Number((100-fee).toFixed(4));
+  const ready=!!finance?.payment_enabled&&finance?.provider_status==='active'&&!!finance?.provider_wallet_id&&beneficiaryPercent>0;
+  return {
+    requiresSplit:true,
+    ready,
+    beneficiaryPercent,
+    split:ready?[{
+      walletId:String(finance.provider_wallet_id),
+      percentualValue:beneficiaryPercent,
+      externalReference:`event:${eventId}`,
+      description:'Repasse automático do evento',
+    }]:undefined,
+  };
+}
+
 Deno.serve(async request=>{
   if(request.method==='OPTIONS')return new Response('ok',{headers:cors});
   if(request.method!=='POST')return j({error:'METHOD_NOT_ALLOWED'},405);
@@ -63,19 +92,33 @@ Deno.serve(async request=>{
     const event=await eventBySlug(admin,slug);
 
     if(action==='status'){
-      const {data:gateway}=await admin
-        .from('billing_gateway_settings')
-        .select('enabled,environment,webhook_configured,last_health_status,last_health_message')
-        .eq('provider','asaas')
-        .maybeSingle();
-      const ready=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&['ready','ok'].includes(String(gateway?.last_health_status||''));
+      const [{data:gateway},finance]=await Promise.all([
+        admin
+          .from('billing_gateway_settings')
+          .select('enabled,environment,webhook_configured,last_health_status,last_health_message')
+          .eq('provider','asaas')
+          .maybeSingle(),
+        financeByOrganization(admin,event.organization_id),
+      ]);
+      const rootReady=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&['ready','ok'].includes(String(gateway?.last_health_status||''));
+      const beneficiary=splitConfiguration(finance,event.id);
+      const ready=rootReady&&beneficiary.ready;
       return j({
         ok:true,
         gateway:{
           provider:'asaas',
           ready,
           environment:gateway?.environment||'sandbox',
-          message:ready?'Pagamento disponível.':gateway?.last_health_message||'O pagamento está sendo configurado.',
+          message:ready
+            ?'Pagamento disponível.'
+            :beneficiary.requiresSplit&&!beneficiary.ready
+              ?'O recebedor deste evento ainda está em configuração.'
+              :gateway?.last_health_message||'O pagamento está sendo configurado.',
+        },
+        beneficiary:{
+          split_required:beneficiary.requiresSplit,
+          ready:beneficiary.ready,
+          percent:beneficiary.beneficiaryPercent,
         },
         price_per_photo:Number(event.price_per_photo||0),
         minimum_amount:ASAAS_MINIMUM_AMOUNT,
@@ -134,16 +177,26 @@ Deno.serve(async request=>{
         },409);
       }
 
-      const {data:gateway}=await admin
-        .from('billing_gateway_settings')
-        .select('enabled,webhook_configured,last_health_status,last_health_message')
-        .eq('provider','asaas')
-        .maybeSingle();
-      const ready=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&['ready','ok'].includes(String(gateway?.last_health_status||''));
-      if(!ready){
+      const [{data:gateway},finance]=await Promise.all([
+        admin
+          .from('billing_gateway_settings')
+          .select('enabled,webhook_configured,last_health_status,last_health_message')
+          .eq('provider','asaas')
+          .maybeSingle(),
+        financeByOrganization(admin,event.organization_id),
+      ]);
+      const rootReady=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&['ready','ok'].includes(String(gateway?.last_health_status||''));
+      const beneficiary=splitConfiguration(finance,event.id);
+      if(!rootReady){
         return j({
           error:'PAYMENT_GATEWAY_NOT_READY',
           message:gateway?.last_health_message||'O pagamento está sendo configurado. Suas fotos podem permanecer no carrinho.',
+        },503);
+      }
+      if(!beneficiary.ready){
+        return j({
+          error:'BENEFICIARY_NOT_READY',
+          message:'O recebimento deste evento ainda está sendo configurado. Nenhuma cobrança foi criada.',
         },503);
       }
 
@@ -233,6 +286,7 @@ Deno.serve(async request=>{
             dueDate:due.toISOString().slice(0,10),
             description:`${sortedIds.length} foto(s) - ${event.title}`,
             externalReference:`event_purchase:${order.id}`,
+            ...(beneficiary.split?{split:beneficiary.split}:{}),
           }),
         });
       }catch(error:any){
@@ -255,6 +309,12 @@ Deno.serve(async request=>{
           due_at:payment.dueDate?new Date(payment.dueDate+'T23:59:59Z').toISOString():null,
           external_reference:`event_purchase:${order.id}`,
           provider_payload:payment,
+          metadata:{
+            ...(order.metadata||{}),
+            beneficiary_split_required:beneficiary.requiresSplit,
+            beneficiary_percent:beneficiary.beneficiaryPercent,
+            beneficiary_wallet_id:finance?.provider_wallet_id||null,
+          },
           updated_at:new Date().toISOString(),
         })
         .eq('id',order.id)
