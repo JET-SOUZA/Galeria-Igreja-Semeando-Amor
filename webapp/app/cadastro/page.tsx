@@ -142,10 +142,13 @@ export default function Cadastro(){
    return;
   }
   setBusy(true);
+  const controller=new AbortController();
+  const timeout=window.setTimeout(()=>controller.abort(),25000);
   try{
    const response=await fetch(`${SB}/functions/v1/visitor-register`,{
     method:'POST',
     headers:{apikey:KEY,'Content-Type':'application/json'},
+    signal:controller.signal,
     body:JSON.stringify({action:'recover_access',organization_id:org?.id,event_slug:eventSlug||undefined,source_event_id:config?.event?.id||undefined,cpf:onlyDigits(recovery.cpf),birth_date:recovery.birth_date,whatsapp:onlyDigits(recovery.whatsapp)}),
    });
    const data=await response.json();
@@ -153,8 +156,9 @@ export default function Cadastro(){
    storeVisitor(data.visitor,data.purchases||[]);
    location.replace(destination());
   }catch(caught:any){
-   setError(caught.message||'Não foi possível recuperar o acesso.');
+   setError(caught?.name==='AbortError'?'A validação demorou além do esperado. Confira sua conexão e tente novamente.':caught.message||'Não foi possível recuperar o acesso.');
   }finally{
+   window.clearTimeout(timeout);
    setBusy(false);
   }
  }
