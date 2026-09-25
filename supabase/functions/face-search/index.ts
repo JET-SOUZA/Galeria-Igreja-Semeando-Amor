@@ -23,6 +23,19 @@ async function sha256(value:string){
   return hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)));
 }
 
+async function faceDownloadToken(eventId:string,photoId:string){
+  const expiresAt=Math.floor(Date.now()/1000)+(4*60*60);
+  const key=await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(SERVICE),
+    {name:'HMAC',hash:'SHA-256'},
+    false,
+    ['sign'],
+  );
+  const signature=hex(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(`${eventId}:${photoId}:${expiresAt}`)));
+  return `${expiresAt}.${signature}`;
+}
+
 function retryableAwsError(error:any){
   return ['ProvisionedThroughputExceededException','ThrottlingException','ServiceUnavailableException','InternalServerError'].includes(String(error?.name||''));
 }
@@ -162,7 +175,7 @@ Deno.serve(async req=>{
       if(photoResponse.ok)photos=await photoResponse.json();
     }
     const previewVersion='20260923-1';
-    photos=photos.map((photo:any)=>event.is_paid?{
+    photos=await Promise.all(photos.map(async(photo:any)=>event.is_paid?{
       id:photo.id,
       original_filename:photo.original_filename,
       similarity:byPhoto.get(photo.id)||0,
@@ -170,10 +183,12 @@ Deno.serve(async req=>{
     }:{
       ...photo,
       original_url:photo.secure_url,
+      original_access_token:await faceDownloadToken(event.id,photo.id),
       thumbnail_url:cld(photo.secure_url,'thumb'),
       display_url:cld(photo.secure_url,'display'),
       similarity:byPhoto.get(photo.id)||0,
-    }).sort((a:any,b:any)=>b.similarity-a.similarity);
+    }));
+    photos.sort((a:any,b:any)=>b.similarity-a.similarity);
 
     await fetch(`${SB}/rest/v1/face_search_consents`,{
       method:'POST',
