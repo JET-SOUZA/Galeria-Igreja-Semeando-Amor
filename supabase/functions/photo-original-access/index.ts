@@ -18,6 +18,25 @@ const hex=(a:ArrayBuffer)=>Array.from(new Uint8Array(a)).map(x=>x.toString(16).p
 async function hash(value:string){return hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))}
 function filename(value:any){return String(value||'foto-original').replace(/[\r\n"\\]/g,'-').slice(0,180)||'foto-original'}
 
+function timingSafeEqual(left:string,right:string){
+  if(left.length!==right.length)return false;
+  let difference=0;
+  for(let index=0;index<left.length;index++)difference|=left.charCodeAt(index)^right.charCodeAt(index);
+  return difference===0;
+}
+
+async function faceSearchCanDownload(input:any,photoId:string,event:any){
+  const token=String(input.face_access_token||'');
+  const [expiresRaw,receivedSignature,...extra]=token.split('.');
+  if(!expiresRaw||!receivedSignature||extra.length)return false;
+  const expiresAt=Number(expiresRaw);
+  const now=Math.floor(Date.now()/1000);
+  if(!Number.isInteger(expiresAt)||expiresAt<now||expiresAt>now+(4*60*60)+60)return false;
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(SERVICE),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const expected=hex(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(`${event.id}:${photoId}:${expiresAt}`)));
+  return timingSafeEqual(receivedSignature,expected);
+}
+
 async function visitorCanDownload(admin:any,input:any,photoId:string,event:any){
   const orderId=String(input.order_id||''),token=String(input.access_token||'');
   if(!orderId||!token)return false;
@@ -103,11 +122,12 @@ Deno.serve(async req=>{
       .is('deleted_at',null)
       .maybeSingle();
     if(!photo?.original_storage_path)return j({error:'Original não disponível.'},404);
-    const {data:event}=await admin.from('events').select('id,organization_id').eq('id',photo.event_id).maybeSingle();
+    const {data:event}=await admin.from('events').select('id,organization_id,is_paid,status').eq('id',photo.event_id).maybeSingle();
     if(!event)return j({error:'Evento não encontrado.'},404);
     const visitorAllowed=await visitorCanDownload(admin,input,photoId,event);
-    const staffAllowed=visitorAllowed?false:await adminCanDownload(admin,req,event);
-    if(!visitorAllowed&&!staffAllowed)return j({error:'Compra confirmada ou acesso administrativo necessário.'},403);
+    const faceAllowed=!event.is_paid&&event.status==='published'?await faceSearchCanDownload(input,photoId,event):false;
+    const staffAllowed=visitorAllowed||faceAllowed?false:await adminCanDownload(admin,req,event);
+    if(!visitorAllowed&&!faceAllowed&&!staffAllowed)return j({error:'Este acesso não corresponde à foto ou expirou. Faça a busca facial novamente.'},403);
     return j(await signedOriginal(admin,photo,event));
   }catch(e:any){
     const message=String(e?.message||'Erro interno.');
