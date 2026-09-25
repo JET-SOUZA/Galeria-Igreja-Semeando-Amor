@@ -53,30 +53,33 @@ async function eventBySlug(admin:any,slug:string){
 async function financeByOrganization(admin:any,organizationId:string){
   const {data,error}=await admin
     .from('organization_finance_settings')
-    .select('payment_provider,provider_wallet_id,provider_status,payment_enabled,platform_fee_percent,settlement_mode')
+    .select('payment_provider,provider_wallet_id,provider_status,payment_enabled,platform_fee_percent,settlement_mode,pix_key_type,pix_key_masked,metadata')
     .eq('organization_id',organizationId)
     .maybeSingle();
   if(error)throw error;
   return data||null;
 }
 
-function splitConfiguration(finance:any,eventId:string){
-  const requiresSplit=finance?.payment_provider==='asaas'&&finance?.settlement_mode==='provider_split';
-  if(!requiresSplit)return {requiresSplit:false,ready:true,split:undefined,beneficiaryPercent:0};
+function settlementConfiguration(finance:any,eventId:string){
+  const mode=String(finance?.settlement_mode||'manual');
   const fee=Math.max(0,Math.min(100,Number(finance?.platform_fee_percent||0)));
   const beneficiaryPercent=Number((100-fee).toFixed(4));
-  const ready=!!finance?.payment_enabled&&finance?.provider_status==='active'&&!!finance?.provider_wallet_id&&beneficiaryPercent>0;
-  return {
-    requiresSplit:true,
-    ready,
-    beneficiaryPercent,
-    split:ready?[{
+  if(mode==='provider_split'){
+    const ready=!!finance?.payment_enabled&&finance?.provider_status==='active'&&!!finance?.provider_wallet_id&&beneficiaryPercent>0;
+    return {mode,ready,beneficiaryPercent,split:ready?[{
       walletId:String(finance.provider_wallet_id),
       percentualValue:beneficiaryPercent,
       externalReference:`event:${eventId}`,
       description:'Repasse automático do evento',
-    }]:undefined,
-  };
+    }]:undefined};
+  }
+  if(mode==='platform_transfer'){
+    const pixKey=String(finance?.metadata?.payout_pix_key||'').trim();
+    const pixType=String(finance?.metadata?.payout_pix_key_type||finance?.pix_key_type||'').trim();
+    const ready=!!finance?.payment_enabled&&finance?.provider_status==='active'&&!!pixKey&&!!pixType&&beneficiaryPercent>0;
+    return {mode,ready,beneficiaryPercent,split:undefined,pixType,pixMasked:finance?.pix_key_masked||null};
+  }
+  return {mode,ready:!!finance?.payment_enabled&&finance?.provider_status==='active',beneficiaryPercent,split:undefined};
 }
 
 Deno.serve(async request=>{
@@ -101,7 +104,7 @@ Deno.serve(async request=>{
         financeByOrganization(admin,event.organization_id),
       ]);
       const rootReady=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&['ready','ok'].includes(String(gateway?.last_health_status||''));
-      const beneficiary=splitConfiguration(finance,event.id);
+      const beneficiary=settlementConfiguration(finance,event.id);
       const ready=rootReady&&beneficiary.ready;
       return j({
         ok:true,
@@ -111,14 +114,15 @@ Deno.serve(async request=>{
           environment:gateway?.environment||'sandbox',
           message:ready
             ?'Pagamento disponível.'
-            :beneficiary.requiresSplit&&!beneficiary.ready
+            :beneficiary.mode!=='manual'&&!beneficiary.ready
               ?'O recebedor deste evento ainda está em configuração.'
               :gateway?.last_health_message||'O pagamento está sendo configurado.',
         },
         beneficiary:{
-          split_required:beneficiary.requiresSplit,
+          settlement_mode:beneficiary.mode,
           ready:beneficiary.ready,
           percent:beneficiary.beneficiaryPercent,
+          pix_key:beneficiary.pixMasked||null,
         },
         price_per_photo:Number(event.price_per_photo||0),
         minimum_amount:ASAAS_MINIMUM_AMOUNT,
@@ -186,7 +190,7 @@ Deno.serve(async request=>{
         financeByOrganization(admin,event.organization_id),
       ]);
       const rootReady=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&['ready','ok'].includes(String(gateway?.last_health_status||''));
-      const beneficiary=splitConfiguration(finance,event.id);
+      const beneficiary=settlementConfiguration(finance,event.id);
       if(!rootReady){
         return j({
           error:'PAYMENT_GATEWAY_NOT_READY',
@@ -311,9 +315,10 @@ Deno.serve(async request=>{
           provider_payload:payment,
           metadata:{
             ...(order.metadata||{}),
-            beneficiary_split_required:beneficiary.requiresSplit,
+            settlement_mode:beneficiary.mode,
             beneficiary_percent:beneficiary.beneficiaryPercent,
             beneficiary_wallet_id:finance?.provider_wallet_id||null,
+            payout_status:beneficiary.mode==='platform_transfer'?'awaiting_payment':null,
           },
           updated_at:new Date().toISOString(),
         })
