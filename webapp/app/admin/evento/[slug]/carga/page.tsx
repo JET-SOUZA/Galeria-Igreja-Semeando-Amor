@@ -202,10 +202,43 @@ export default function MassUpload({params}:{params:{slug:string}}){
   const providerOk=['supabase','r2','s3'].includes(backend?.provider||'');
   const ready=!extractingZip&&files.length>0&&rejected.length===0&&capacityOk&&fileOk&&backendOk&&providerOk;
 
-  function pick(e:React.ChangeEvent<HTMLInputElement>){
+  async function pick(e:React.ChangeEvent<HTMLInputElement>){
     const selected=Array.from(e.target.files||[]);
     e.target.value='';
-    addFiles(selected);
+    if(!selected.length)return;
+    const archives=selected.filter(file=>/\.zip$/i.test(file.name)||file.type==='application/zip'||file.type==='application/x-zip-compressed');
+    const direct=selected.filter(file=>!archives.includes(file));
+    if(!archives.length){addFiles(direct);return;}
+    if(zipBusyRef.current||running)return;
+    zipBusyRef.current=true;
+    setExtractingZip(true);
+    try{
+      const {default:JSZip}=await import('jszip');
+      const extracted:File[]=[];
+      for(const archive of archives){
+        setMsg(`Preparando ${archive.name}...`);
+        const zip=await JSZip.loadAsync(await archive.arrayBuffer());
+        const entries=Object.values(zip.files).filter(entry=>!entry.dir&&!entry.name.startsWith('__MACOSX/')&&!entry.name.split('/').pop()?.startsWith('._'));
+        for(const entry of entries){
+          if(!ACCEPTED_EXT.test(entry.name)&&!RAW_EXT.test(entry.name))continue;
+          const blob=await entry.async('blob');
+          const name=entry.name.split('/').pop()||entry.name;
+          const extension=name.split('.').pop()?.toLowerCase()||'';
+          const types:Record<string,string>={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif',avif:'image/avif',tif:'image/tiff',tiff:'image/tiff'};
+          const file=new File([blob],name,{type:types[extension]||'application/octet-stream',lastModified:entry.date.getTime()});
+          Object.defineProperty(file,'webkitRelativePath',{value:entry.name});
+          extracted.push(file);
+          await sleep(0);
+        }
+      }
+      addFiles([...direct,...extracted]);
+    }catch(error:any){
+      if(direct.length)addFiles(direct);
+      setMsg(`As fotos comuns foram mantidas, mas não foi possível abrir o ZIP: ${error?.message||'arquivo inválido ou incompleto'}.`);
+    }finally{
+      zipBusyRef.current=false;
+      setExtractingZip(false);
+    }
   }
 
   function addFiles(selected:File[]){
@@ -315,7 +348,7 @@ export default function MassUpload({params}:{params:{slug:string}}){
     if(!storage||!backend)throw Error('Storage não carregado.');
     const s=await auth();
     const safe=file.name.replace(/[^a-zA-Z0-9._-]+/g,'-');
-    const path=`${storage.object_prefix}/originals/${crypto.randomUUID()}-${safe}`;
+    const path=`${event!.id}/originals/${crypto.randomUUID()}-${safe}`;
     const project=new URL(SB).hostname.split('.')[0];
     const endpoint=`https://${project}.storage.supabase.co/storage/v1/upload/resumable`;
     await new Promise<void>((resolve,reject)=>{
@@ -460,8 +493,16 @@ export default function MassUpload({params}:{params:{slug:string}}){
         return;
       }
       const fin=await batchApi({action:'finish',batch_id:created.id});
-      setMsg(fin.failed_files?`Lote concluído parcialmente: ${fin.completed_files} prontas e ${fin.failed_files} com falha. Use “Tentar falhas novamente”.`:`Lote concluído: ${fin.completed_files} fotos registradas.${fin.face_started?' Reconhecimento facial iniciado em segundo plano.':''}`);
-      await load(created.id);
+      if(fin.failed_files){
+        setMsg(`Algumas fotos não foram enviadas: ${fin.completed_files} concluída(s) e ${fin.failed_files} com falha. Toque em “Tentar novamente”.`);
+        await load(created.id);
+      }else{
+        const completed=Number(fin.completed_files||working.length);
+        setMsg(`${completed} foto(s) adicionada(s) com sucesso.${fin.face_started?' O reconhecimento facial continuará automaticamente.':''}`);
+        setFiles([]);setFailures([]);setRejected([]);setIgnoredFiles([]);setPickSummary(null);setDone(0);setFailed(0);setActive({});setBatchId('');
+        if(event)localStorage.removeItem(`semeando-upload:${event.id}`);
+        await load();
+      }
     }catch(e:any){
       setMsg(e.message);
       if(e.data?.storage)setStorage((s:any)=>s?{...s,backend:e.data.storage,backend_available_bytes:e.data.storage.backend_available_bytes}:s);
@@ -478,14 +519,47 @@ export default function MassUpload({params}:{params:{slug:string}}){
     errors:serverItems.filter(i=>i.status==='failed').length,
   }),[serverItems]);
 
-  return <main className="mass">
-    <header><div><a href={`/admin/evento/${params.slug}/fotos`}>← Gerenciar fotos</a><span>UPLOAD DE FOTOS</span><h1>{event?.title||'Evento grande'}</h1><p>Envie milhares de fotos com retomada e tentativas automáticas.</p></div><a className="secondary" href={`/evento/${params.slug}`}>Ver galeria</a></header>
+  return <main className="mass simpleUpload">
+    <header><div><a href={`/admin/evento/${params.slug}/fotos`}>← Voltar às fotos</a><span>ADICIONAR FOTOS</span><h1>{event?.title||'Evento'}</h1><p>Adicione uma foto, várias fotos ou um ZIP. O sistema cuida do restante automaticamente.</p></div><a className="secondary" href={`/evento/${params.slug}`}>Ver galeria</a></header>
     {msg&&<div className="notice">{msg}</div>}
-    <section className="readiness"><div className="head"><div><span>DISPONIBILIDADE DO ENVIO</span><h2>{loading?'Verificando o sistema...':backendOk&&providerOk?'Tudo pronto para receber suas fotos':'Envio temporariamente indisponível'}</h2></div><b className={`state ${backendOk&&providerOk?'ok':'bad'}`}>{loading?'VERIFICANDO':backendOk&&providerOk?'PRONTO':'NÃO LIBERADO'}</b></div>{!loading&&backendOk&&providerOk&&<p className="readyCopy">Os originais serão preservados e o envio poderá ser retomado se a conexão cair.</p>}{backend?.message&&<p className="warning">⚠ {backend.message}</p>}</section>
-    <section className="picker"><div className="pickerHead"><div><span>01 • SELECIONAR FOTOS</span><h2>Monte a fila em partes</h2><p>A fila aceita milhares de fotos. No iPhone, adicione até {SAFE_PICK_SIZE} por seleção e repita: todas ficam reunidas na mesma fila para um único envio. O seletor do iPhone não informa a quantidade enquanto você marca; depois de tocar em <b>Abrir</b>, confirme a rodada e o total abaixo.</p><p className="iphoneNote"><b>Original preservado:</b> para conservar o HEIC exato, salve/exporte no app Arquivos e selecione por lá. A Fototeca pode entregar uma cópia JPEG ao navegador.</p></div><div className="pickButtons"><label>＋ Adicionar fotos{files.length>0&&<b> • {files.length.toLocaleString('pt-BR')} na fila</b>}<input hidden type="file" disabled={extractingZip} multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" onChange={pick}/></label><label className="folder">▣ Adicionar pasta<input hidden type="file" disabled={extractingZip} multiple accept="image/*,.heic,.heif,.tif,.tiff,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef" {...({webkitdirectory:'',directory:''} as any)} onChange={pick}/></label><label className="folder">{extractingZip?'Extraindo ZIP...':'▣ Adicionar ZIP'}<input hidden type="file" multiple accept=".zip,application/zip" disabled={extractingZip||running} onChange={pickZip}/></label>{files.length>0&&!running&&!extractingZip&&<button className="clear" onClick={()=>{setFiles([]);setFailures([]);setRejected([]);setIgnoredFiles([]);setPickSummary(null);setMsg('Fila local limpa. Nenhuma foto já enviada foi apagada.')}}>Limpar seleção local</button>}</div></div>{files.length>0&&<div className="selectionCount" aria-live="polite"><div><small>TOTAL NA FILA</small><strong>{files.length.toLocaleString('pt-BR')}</strong><em>fotos</em></div>{pickSummary&&<><div><small>ÚLTIMA RODADA</small><strong>{pickSummary.received.toLocaleString('pt-BR')}</strong><em>arquivos recebidos</em></div><div><small>NOVAS</small><strong>{pickSummary.added.toLocaleString('pt-BR')}</strong><em>adicionadas</em></div><div><small>DUPLICADAS</small><strong>{pickSummary.duplicates.toLocaleString('pt-BR')}</strong><em>ignoradas</em></div></>}<p>Próximo marco: <b>{(Math.floor(files.length/SAFE_PICK_SIZE)+1)*SAFE_PICK_SIZE}</b> — faltam {((Math.floor(files.length/SAFE_PICK_SIZE)+1)*SAFE_PICK_SIZE-files.length).toLocaleString('pt-BR')} fotos.</p></div>}</section>
-    {(files.length>0||rejected.length>0||ignoredFiles.length>0)&&<><section className="analysis"><div className="analysisTitle"><div><span>02 • ANÁLISE DO LOTE</span><h2>{files.length.toLocaleString('pt-BR')} fotos • {bytes(stats.total)}</h2><small>Arquivos recebidos preservados sem recompressão • prévias somadas de até {bytes(stats.previewCap)}</small></div><b className={`state ${ready?'ok':'bad'}`}>{ready?'PRONTO PARA INICIAR':'BLOQUEADO'}</b></div><div className="checks"><article className={fileOk?'okc':'badc'}><b>{fileOk?'✓':'!'}</b><div><strong>Maior arquivo</strong><small>{bytes(stats.max)} {backend?.max_file_bytes?`de ${bytes(backend.max_file_bytes)} permitidos`:''}</small></div></article><article className={capacityOk?'okc':'badc'}><b>{capacityOk?'✓':'!'}</b><div><strong>Capacidade</strong><small>{capacityOk?'Há espaço disponível para este lote.':'Este lote ultrapassa o espaço disponível no momento.'}</small></div></article><article className={backendOk&&providerOk?'okc':'badc'}><b>{backendOk&&providerOk?'✓':'!'}</b><div><strong>Sistema</strong><small>{backendOk&&providerOk?'Pronto para receber as fotos.':'O envio ainda precisa ser liberado.'}</small></div></article><article className={rejected.length===0?'okc':'badc'}><b>{rejected.length===0?'✓':'!'}</b><div><strong>Formatos</strong><small>{rejected.length===0?'Todas as fotos são compatíveis.':`${rejected.length} arquivo(s) exige(m) conversão.`}</small></div></article><article className="okc"><b>3</b><div><strong>Concorrência controlada</strong><small>3 originais e 1 prévia pesada por vez.</small></div></article></div>{rejected.length>0&&<div className="rejected"><b>Converta estes arquivos antes de iniciar:</b>{rejected.slice(0,20).map((x,i)=><p key={`${x.name}-${i}`}><strong>{x.name}</strong> — {x.reason}</p>)}{rejected.length>20&&<p>… e mais {rejected.length-20} arquivo(s).</p>}</div>}{ignoredFiles.length>0&&<details className="ignored"><summary>{ignoredFiles.length.toLocaleString('pt-BR')} arquivo(s) que não são imagem foram ignorados — ver nomes</summary>{ignoredFiles.slice(0,50).map((x,i)=><p key={`${x.name}-${i}`}><strong>{x.name}</strong> — {x.reason}</p>)}{ignoredFiles.length>50&&<p>… e mais {ignoredFiles.length-50} arquivo(s).</p>}</details>}<div className="actions"><button className="primary" disabled={!ready||running} onClick={()=>run()}>{running?'Processando...':'▶ Iniciar upload'}</button>{running&&<button className="secondary" onClick={pause}>Ⅱ Pausar após atuais</button>}{failures.length>0&&!running&&<button className="retry" onClick={retry}>↻ Tentar {failures.length} falha(s) novamente</button>}</div></section>
-    <section className="progress"><div className="barHead"><div><span>PROGRESSO REAL</span><b>{done.toLocaleString('pt-BR')} de {files.length.toLocaleString('pt-BR')}</b></div><strong>{pct}%</strong></div><div className="bar"><i style={{width:`${pct}%`}}/></div><div className="progressStats"><span>↑ {Math.max(serverProgress.sent,done)} enviados</span><span>✓ {Math.max(serverProgress.processed,done)} processados</span><span>… {Math.max(serverProgress.pending,files.length-done-failed-Object.keys(active).length)} pendentes</span><span>! {Math.max(serverProgress.errors,failed)} com erro</span><span>↻ {Object.keys(active).length} em andamento</span></div>{Object.entries(active).length>0&&<div className="activeList">{Object.entries(active).map(([k,a])=><div key={k}><span title={a.name}>{a.name}<small>{a.stage}</small></span><b>{a.pct}%</b></div>)}</div>}{failures.length>0&&<details><summary>Ver falhas desta sessão ({failures.length})</summary>{failures.slice(0,50).map((x,i)=><p key={i}><b>{x.file.name}</b> — {x.error}</p>)}</details>}</section></>}
-    <section className="history"><div><span>ÚLTIMOS LOTES</span><h2>Histórico do evento</h2></div>{batches.length?<div className="batchList">{batches.map(b=><button key={b.id} onClick={()=>load(b.id)}><span>{new Date(b.created_at).toLocaleString('pt-BR')}</span><b>{b.completed_files}/{b.total_files}</b><em className={b.status}>{b.status}</em><small>{bytes(Number(b.total_bytes||0))}</small></button>)}</div>:<p>Nenhum lote registrado ainda.</p>}</section>
-    <style jsx>{`.mass{max-width:1180px;margin:auto;padding:90px 18px 60px;color:#f6f7f9}.mass>header{display:flex;justify-content:space-between;gap:18px;align-items:end}.mass>header a{color:#a2a9b3;text-decoration:none;font-weight:800}.mass>header span,.readiness span,.picker span,.analysis span,.progress span,.history span{display:block;color:#ff9250;font-size:10px;letter-spacing:.15em;font-weight:950;margin-top:10px}.mass h1{font-size:clamp(34px,5vw,56px);margin:7px 0}.mass h2{margin:5px 0}.mass header p,.picker p,.warning,.history p{color:#9ca3ad;line-height:1.55}.picker .iphoneNote{color:#ffb184;font-size:11px;max-width:760px;margin-bottom:0}.notice{margin:16px 0;background:#24170f;border:1px solid #60391f;border-radius:13px;padding:12px}.secondary,.primary,.retry,.pickButtons label,.pickButtons .clear{border:0;border-radius:11px;padding:11px 14px;background:#282e36;color:#fff;text-decoration:none;font-weight:900;cursor:pointer}.readiness,.picker,.analysis,.progress,.history{background:#12161b;border:1px solid #303740;border-radius:20px;padding:18px;margin-top:15px}.head,.analysisTitle,.barHead,.pickerHead,.actions{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.pickerHead>div:first-child{flex:1 1 600px}.analysisTitle small{color:#8f969f}.state{font-size:9px;padding:8px 10px;border-radius:999px}.state.ok{background:#16372a;color:#7fe3b2;border:1px solid #276046}.state.bad{background:#351d18;color:#ff9b86;border:1px solid #6b352a}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}.metrics article{background:#0c0f13;border:1px solid #292f37;border-radius:13px;padding:12px;display:grid}.metrics small{color:#838b96}.metrics strong{margin-top:4px}.warning{background:#251a12;padding:10px;border-radius:10px}.pickButtons{display:flex;gap:8px;flex-wrap:wrap}.pickButtons label{background:#ff7417;color:#101114}.pickButtons label>b{font-size:10px}.pickButtons .folder{background:#2a3038;color:#fff}.pickButtons .clear{background:#3b2220;color:#ffb8ad}.selectionCount{display:grid;grid-template-columns:repeat(4,minmax(100px,1fr));gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid #303740}.selectionCount>div{display:grid;background:#0c0f13;border:1px solid #343b45;border-radius:13px;padding:11px}.selectionCount small{font-size:9px;color:#949ca7;font-weight:900;letter-spacing:.1em}.selectionCount strong{font-size:28px;color:#ff8b40}.selectionCount em{font-style:normal;font-size:10px;color:#aeb5bd}.selectionCount p{grid-column:1/-1;margin:0;padding:9px 11px;background:#20170f;border-radius:10px;color:#ffc197}.checks{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}.checks article{display:flex;align-items:center;gap:9px;border:1px solid #303740;background:#0e1115;border-radius:13px;padding:11px}.checks article>b{width:29px;height:29px;border-radius:9px;display:grid;place-items:center;background:#222831;flex:none}.checks article div{display:grid}.checks small{color:#8b929c;font-size:9px}.checks .okc>b{color:#70d9a8}.checks .badc{border-color:#773b30}.checks .badc>b{color:#ff8872}.rejected{background:#2b1713;border:1px solid #75382d;color:#ffc2b6;border-radius:12px;padding:11px;margin-bottom:12px}.rejected>p{font-size:10px;margin:6px 0;overflow-wrap:anywhere}.ignored{color:#aeb4bc;font-size:10px;margin:0 0 12px}.ignored summary{cursor:pointer;font-weight:800}.ignored p{margin:6px 0;overflow-wrap:anywhere}.actions{justify-content:flex-start}.actions .primary{background:#ff7417;color:#111}.actions button:disabled{opacity:.45;cursor:not-allowed}.retry{background:#855225}.barHead{align-items:end}.barHead div{display:grid}.barHead strong{font-size:28px}.bar{height:12px;border-radius:999px;background:#292e35;overflow:hidden;margin:10px 0}.bar i{display:block;height:100%;background:#ff7417;transition:width .2s}.progressStats{display:flex;gap:14px;flex-wrap:wrap;color:#a7aeb7;font-size:10px}.activeList{display:grid;gap:5px;margin-top:12px}.activeList div{display:flex;justify-content:space-between;gap:10px;background:#0c0f13;padding:8px 10px;border-radius:9px}.activeList span{margin:0;color:#c8ccd2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0;text-transform:none;display:grid}.activeList span small{color:#838b96;font-size:9px}.activeList b{color:#ff9855}.progress details{margin-top:12px;color:#b5bbc4}.progress details p{font-size:10px}.batchList{display:grid;gap:6px;margin-top:12px}.batchList button{display:grid;grid-template-columns:1.6fr .8fr .8fr .8fr;gap:8px;align-items:center;text-align:left;background:#0d1014;border:1px solid #2d333b;color:#fff;border-radius:10px;padding:10px}.batchList span{margin:0;color:#a7adb6;letter-spacing:0;font-size:9px}.batchList em{font-style:normal;font-size:9px;color:#ff9b61}.batchList small{text-align:right;color:#8e959f}@media(max-width:900px){.checks{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.mass{padding:82px 11px 45px}.mass>header{display:grid}.metrics{grid-template-columns:1fr 1fr}.pickerHead{display:grid}.pickButtons{display:grid;grid-template-columns:1fr 1fr}.pickButtons label,.pickButtons .clear{text-align:center;font-size:10px}.selectionCount{grid-template-columns:1fr 1fr}.batchList button{grid-template-columns:1fr 1fr}.batchList small{text-align:left}.analysisTitle{align-items:flex-start}}`}</style>
+
+    <section className="picker simpleCard">
+      <div className="simpleHead">
+        <div><span>FOTOS DO EVENTO</span><h2>Escolha o que deseja adicionar</h2><p>Você pode enviar uma única foto agora e voltar depois para adicionar outras. Também pode selecionar várias de uma vez.</p></div>
+        <b className={`state ${loading?'wait':backendOk&&providerOk?'ok':'bad'}`}>{loading?'VERIFICANDO':backendOk&&providerOk?'PRONTO':'INDISPONÍVEL'}</b>
+      </div>
+      {!loading&&(!backendOk||!providerOk)&&<p className="warning">O envio está temporariamente indisponível. Atualize a página em alguns instantes.</p>}
+      <div className="simpleActions">
+        <label className={`primaryPick ${running||extractingZip?'disabled':''}`}>
+          {extractingZip?'Preparando ZIP...':'＋ Adicionar fotos'}
+          <input hidden type="file" disabled={running||extractingZip||!backendOk||!providerOk} multiple accept="image/*,.heic,.heif,.tif,.tiff,.zip,application/zip" onChange={pick}/>
+        </label>
+        {files.length>0&&!running&&!extractingZip&&<button className="clear" onClick={()=>{setFiles([]);setFailures([]);setRejected([]);setIgnoredFiles([]);setPickSummary(null);setMsg('Seleção limpa. Nenhuma foto já enviada foi apagada.')}}>Limpar seleção</button>}
+      </div>
+
+      {files.length>0&&<div className="selectionSimple">
+        <div><strong>{files.length.toLocaleString('pt-BR')}</strong><span>{files.length===1?'foto selecionada':'fotos selecionadas'}</span></div>
+        <div><strong>{bytes(stats.total)}</strong><span>total</span></div>
+      </div>}
+
+      {rejected.length>0&&<div className="rejected"><b>{rejected.length} arquivo(s) precisam de conversão antes do envio.</b>{rejected.slice(0,10).map((x,i)=><p key={`${x.name}-${i}`}><strong>{x.name}</strong> — {x.reason}</p>)}</div>}
+
+      {files.length>0&&<div className="sendRow">
+        <button className="sendBtn" disabled={!ready||running} onClick={()=>run()}>{running?'Enviando...':`Enviar ${files.length===1?'1 foto':files.length.toLocaleString('pt-BR')+' fotos'}`}</button>
+        {running&&<button className="secondary" onClick={pause}>Pausar</button>}
+        {failures.length>0&&!running&&<button className="retry" onClick={retry}>Tentar novamente ({failures.length})</button>}
+      </div>}
+    </section>
+
+    {(running||Object.keys(active).length>0||failures.length>0)&&<section className="progress simpleCard">
+      <div className="barHead"><div><span>ENVIO</span><b>{Math.max(done,serverProgress.processed)} de {files.length}</b></div><strong>{pct}%</strong></div>
+      <div className="bar"><i style={{width:`${pct}%`}}/></div>
+      <p className="mutedProgress">{running?'Pode deixar esta tela aberta enquanto enviamos. Se a conexão oscilar, o sistema tenta novamente.':failures.length?'Algumas fotos precisam de nova tentativa.':'Concluído.'}</p>
+      {Object.entries(active).length>0&&<div className="activeList">{Object.entries(active).map(([k,a])=><div key={k}><span>{a.name}<small>{a.stage.replace(/nova tentativa \d+\/\d+/i,'tentando novamente')}</small></span><b>{a.pct}%</b></div>)}</div>}
+    </section>}
+
+    <details className="history compactHistory"><summary>Histórico de envios</summary>{batches.length?<div className="batchList">{batches.map(b=><button key={b.id} onClick={()=>load(b.id)}><span>{new Date(b.created_at).toLocaleString('pt-BR')}</span><b>{b.completed_files}/{b.total_files}</b><em className={b.status}>{b.status==='completed'?'concluído':b.status==='failed'?'falhou':b.status==='partial'?'parcial':b.status}</em><small>{bytes(Number(b.total_bytes||0))}</small></button>)}</div>:<p>Nenhum envio anterior.</p>}</details>
+
+    <style jsx>{`.mass{max-width:980px;margin:auto;padding:90px 18px 60px;color:#f6f7f9}.mass>header{display:flex;justify-content:space-between;gap:18px;align-items:end}.mass>header a{color:#a2a9b3;text-decoration:none;font-weight:800}.mass>header span,.simpleHead span,.barHead span{display:block;color:#ff9250;font-size:10px;letter-spacing:.15em;font-weight:950;margin-top:10px}.mass h1{font-size:clamp(34px,5vw,56px);margin:7px 0}.mass h2{margin:5px 0}.mass header p,.simpleCard p{color:#9ca3ad;line-height:1.55}.notice{margin:16px 0;background:#24170f;border:1px solid #60391f;border-radius:13px;padding:12px}.secondary,.retry,.clear,.sendBtn{border:0;border-radius:11px;padding:12px 15px;background:#282e36;color:#fff;text-decoration:none;font-weight:900;cursor:pointer}.simpleCard,.compactHistory{background:#12161b;border:1px solid #303740;border-radius:20px;padding:20px;margin-top:15px}.simpleHead,.simpleActions,.sendRow,.barHead{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.state{font-size:9px;padding:8px 10px;border-radius:999px}.state.ok{background:#16372a;color:#7fe3b2;border:1px solid #276046}.state.bad{background:#351d18;color:#ff9b86;border:1px solid #6b352a}.state.wait{background:#242932;color:#c4cad2;border:1px solid #3a424c}.warning{background:#251a12;padding:10px;border-radius:10px}.simpleActions{justify-content:flex-start;margin-top:18px}.primaryPick{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 20px;border-radius:12px;background:#ff7417;color:#111;font-weight:950;cursor:pointer}.primaryPick.disabled{opacity:.45;cursor:not-allowed}.clear{background:#3b2220;color:#ffb8ad}.selectionSimple{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}.selectionSimple>div{display:grid;background:#0c0f13;border:1px solid #343b45;border-radius:13px;padding:14px}.selectionSimple strong{font-size:28px;color:#ff8b40}.selectionSimple span{color:#9ca3ad;font-size:11px}.sendRow{justify-content:flex-start;margin-top:16px}.sendBtn{background:#ff7417;color:#111}.sendBtn:disabled{opacity:.45;cursor:not-allowed}.retry{background:#855225}.rejected{background:#2b1713;border:1px solid #75382d;color:#ffc2b6;border-radius:12px;padding:11px;margin-top:14px}.rejected p{font-size:10px;margin:6px 0}.barHead{align-items:end}.barHead div{display:grid}.barHead strong{font-size:28px}.bar{height:12px;border-radius:999px;background:#292e35;overflow:hidden;margin:10px 0}.bar i{display:block;height:100%;background:#ff7417;transition:width .2s}.mutedProgress{font-size:12px}.activeList{display:grid;gap:5px;margin-top:12px}.activeList div{display:flex;justify-content:space-between;gap:10px;background:#0c0f13;padding:9px 10px;border-radius:9px}.activeList span{display:grid;min-width:0;overflow:hidden;text-overflow:ellipsis}.activeList small{color:#838b96;font-size:9px}.activeList b{color:#ff9855}.compactHistory summary{cursor:pointer;font-weight:900}.batchList{display:grid;gap:6px;margin-top:12px}.batchList button{display:grid;grid-template-columns:1.6fr .7fr .8fr .7fr;gap:8px;align-items:center;text-align:left;background:#0d1014;border:1px solid #2d333b;color:#fff;border-radius:10px;padding:10px}.batchList span{color:#a7adb6;font-size:9px}.batchList em{font-style:normal;font-size:9px;color:#ff9b61}.batchList small{text-align:right;color:#8e959f}@media(max-width:760px){.mass{padding:82px 11px 45px}.mass>header{display:grid}.simpleHead{align-items:flex-start}.selectionSimple{grid-template-columns:1fr 1fr}.primaryPick{width:100%}.simpleActions{display:grid}.batchList button{grid-template-columns:1fr 1fr}.batchList small{text-align:left}}`}</style>
   </main>;
 }
