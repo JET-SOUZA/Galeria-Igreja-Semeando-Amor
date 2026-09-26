@@ -1,7 +1,7 @@
 'use client';
 
 import {FormEvent,useEffect,useMemo,useState} from 'react';
-import {CHURCH_LOGO,DEVELOPER_LOGO,DEVELOPER_NAME} from '../brand';
+import {DEFAULT_ORG_LOGO,DEVELOPER_LOGO,DEVELOPER_NAME} from '../brand';
 import {SB,KEY} from '../../lib/sb';
 import {clearVisitorSession,readVisitorSession,writeVisitorSession} from '../../lib/visitor-session';
 import styles from './cadastro.module.css';
@@ -203,7 +203,7 @@ export default function Cadastro(){
   }
  }
 
- const logo=branding.logo_url||CHURCH_LOGO;
+ const logo=branding.logo_url||DEFAULT_ORG_LOGO;
  const name=branding.platform_name||'Legacy Semeando Memórias';
  const display=branding.organization_display_name||org?.name||'Igreja Semeando Amor';
  return <main className="register-page" style={{backgroundColor:branding.background_color||undefined,color:branding.text_color||undefined}}>
