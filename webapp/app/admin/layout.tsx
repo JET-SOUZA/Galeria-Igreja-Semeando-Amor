@@ -12,14 +12,18 @@ export default function AdminLayout({children}:{children:ReactNode}){
  useEffect(()=>{
   if(publicAdminRoute){setChecking(false);return}
   let active=true;
-  const check=async()=>{
-   const result=await requireActiveAdminAccess();
-   if(active&&result)setChecking(false);
+  const check=async(initial=false)=>{
+   const result=await requireActiveAdminAccess({redirect:initial});
+   if(!active)return;
+   if(result){setChecking(false);return}
+   // Se a sessão ainda existe, foi uma falha transitória: mantém a tela aberta e tenta de novo depois.
+   if(readSession()){setChecking(false);return}
+   location.href='/admin/login?reason=session';
   };
-  check();
-  const timer=window.setInterval(check,30000);
-  const onFocus=()=>check();
-  const onVisibility=()=>{if(document.visibilityState==='visible')check()};
+  check(true);
+  const timer=window.setInterval(()=>check(false),120000);
+  const onFocus=()=>check(false);
+  const onVisibility=()=>{if(document.visibilityState==='visible')check(false)};
   const onStorage=(e:StorageEvent)=>{if(e.key==='semeando_admin_session'&&!readSession())location.href='/admin/login?reason=session'};
   window.addEventListener('focus',onFocus);
   document.addEventListener('visibilitychange',onVisibility);
