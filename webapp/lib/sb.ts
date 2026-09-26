@@ -5,17 +5,44 @@ export function readSession():AdminSession|null{
   if(typeof window==='undefined')return null;
   try{return JSON.parse(localStorage.getItem('semeando_admin_session')||sessionStorage.getItem('semeando_admin_session')||'null')}catch{return null}
 }
+const ACCESS_CACHE_KEY='semeando_admin_access_cache';
 export function clearAdminSession(){
   if(typeof window==='undefined')return;
   localStorage.removeItem('semeando_admin_session');
   sessionStorage.removeItem('semeando_admin_session');
+  localStorage.removeItem(ACCESS_CACHE_KEY);
+  sessionStorage.removeItem(ACCESS_CACHE_KEY);
+}
+export function cacheAdminAccess(data:any){
+  if(typeof window==='undefined'||!data)return;
+  try{localStorage.setItem(ACCESS_CACHE_KEY,JSON.stringify({saved_at:Date.now(),data}))}catch{}
+}
+function readCachedAdminAccess(maxAgeMs=120000){
+  if(typeof window==='undefined')return null;
+  try{
+    const raw=localStorage.getItem(ACCESS_CACHE_KEY)||sessionStorage.getItem(ACCESS_CACHE_KEY);
+    if(!raw)return null;
+    const parsed=JSON.parse(raw);
+    if(!parsed?.saved_at||Date.now()-Number(parsed.saved_at)>maxAgeMs)return null;
+    return parsed.data||null;
+  }catch{return null}
 }
 export async function session():Promise<AdminSession|null>{
   let s=readSession(); if(!s?.access_token)return null;
   if((s.expires_at?Number(s.expires_at)*1000:0)>Date.now()+60000||!s.refresh_token)return s;
-  const r=await fetch(`${SB}/auth/v1/token?grant_type=refresh_token`,{method:'POST',headers:{'Content-Type':'application/json',apikey:KEY},body:JSON.stringify({refresh_token:s.refresh_token})});
-  if(!r.ok){clearAdminSession();return null} s=await r.json();
-  (localStorage.getItem('semeando_admin_session')?localStorage:sessionStorage).setItem('semeando_admin_session',JSON.stringify(s)); return s;
+  try{
+    const r=await fetch(`${SB}/auth/v1/token?grant_type=refresh_token`,{method:'POST',headers:{'Content-Type':'application/json',apikey:KEY},body:JSON.stringify({refresh_token:s.refresh_token})});
+    if(!r.ok){
+      if(r.status===400||r.status===401){clearAdminSession();return null}
+      return {...s,_refresh_temporarily_unavailable:true};
+    }
+    s=await r.json();
+    (localStorage.getItem('semeando_admin_session')?localStorage:sessionStorage).setItem('semeando_admin_session',JSON.stringify(s));
+    return s;
+  }catch{
+    // Uma oscilação de rede não deve transformar uma sessão válida em logout.
+    return {...s,_refresh_temporarily_unavailable:true};
+  }
 }
 export async function requireActiveAdminAccess(opts:{redirect?:boolean}={redirect:true}){
   const s=await session();
@@ -23,24 +50,34 @@ export async function requireActiveAdminAccess(opts:{redirect?:boolean}={redirec
     if(opts.redirect&&typeof window!=='undefined')location.href='/admin/login?reason=session';
     return null;
   }
-  try{
-    const r=await fetch(`${SB}/functions/v1/admin-access`,{headers:{apikey:KEY,Authorization:`Bearer ${s.access_token}`},cache:'no-store'});
-    const d=await r.json().catch(()=>({}));
-    if(r.ok&&d?.ok)return {session:s,...d};
-    if(r.status===401||r.status===402||r.status===403){
-      clearAdminSession();
-      const reason=encodeURIComponent(String(d?.state||d?.code||'blocked'));
-      const message=encodeURIComponent(String(d?.error||d?.access?.reason||'Acesso indisponível.'));
-      if(opts.redirect&&typeof window!=='undefined')location.href=`/admin/login?reason=${reason}&message=${message}`;
-      return null;
-    }
-    throw new Error(d?.error||'Não foi possível validar o acesso.');
-  }catch{
-    // Falha fechada: uma sessão existente não basta para liberar a interface administrativa.
-    // A sessão é preservada para permitir uma nova tentativa quando a rede voltar.
-    if(opts.redirect&&typeof window!=='undefined')location.href='/admin/login?reason=validation_unavailable';
-    return null;
+  let lastError:any=null;
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const controller=new AbortController();
+      const timeout=setTimeout(()=>controller.abort(),8000);
+      const r=await fetch(`${SB}/functions/v1/admin-access`,{headers:{apikey:KEY,Authorization:`Bearer ${s.access_token}`},cache:'no-store',signal:controller.signal});
+      clearTimeout(timeout);
+      const d=await r.json().catch(()=>({}));
+      if(r.ok&&d?.ok){
+        cacheAdminAccess(d);
+        return {session:s,...d};
+      }
+      if(r.status===401||r.status===402||r.status===403){
+        clearAdminSession();
+        const reason=encodeURIComponent(String(d?.state||d?.code||'blocked'));
+        const message=encodeURIComponent(String(d?.error||d?.access?.reason||'Acesso indisponível.'));
+        if(opts.redirect&&typeof window!=='undefined')location.href=`/admin/login?reason=${reason}&message=${message}`;
+        return null;
+      }
+      lastError=new Error(d?.error||`Falha temporária (${r.status}).`);
+    }catch(error){lastError=error}
+    if(attempt<2)await new Promise(resolve=>setTimeout(resolve,350*(attempt+1)));
   }
+  // Em falha transitória, preserva a sessão e usa por curto período a última autorização confirmada.
+  const cached=readCachedAdminAccess();
+  if(cached?.ok)return {session:s,...cached,validation_degraded:true};
+  console.warn('admin-access temporariamente indisponível',lastError);
+  return null;
 }
 export async function adminHeaders(json=true){const s=await session();return {apikey:KEY,Authorization:`Bearer ${s?.access_token||''}`,...(json?{'Content-Type':'application/json'}:{})}}
 export const money=(v:any)=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
