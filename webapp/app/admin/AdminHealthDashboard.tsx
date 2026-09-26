@@ -7,7 +7,10 @@ const stateLabel:Record<string,string>={ready:'Pronto',processing:'Preparando',a
 export default function AdminHealthDashboard(){const[data,setData]=useState<any>(null),[loading,setLoading]=useState(true),[msg,setMsg]=useState(''),[preparing,setPreparing]=useState(''),[shareTarget,setShareTarget]=useState<Row|null>(null),[shareMsg,setShareMsg]=useState('');
  async function load(){setLoading(true);setMsg('');try{const s=await session();if(!s?.access_token)throw Error('Sessão expirada.');const r=await fetch(`${SB}/functions/v1/event-health`,{headers:{apikey:KEY,Authorization:`Bearer ${s.access_token}`}}),d=await r.json();if(!r.ok)throw Error(d.error||'Não foi possível carregar a saúde dos eventos.');setData(d)}catch(e:any){setMsg(e.message)}finally{setLoading(false)}}useEffect(()=>{load()},[]);
  const events:Row[]=data?.events||[],needs=useMemo(()=>events.filter(e=>['attention','blocked','processing','draft'].includes(e.health.state)),[events]),canFace=(data?.permissions||[]).includes('*')||(data?.permissions||[]).includes('photos.face');
- function eventUrl(e:Row){return `${location.origin}/evento/${e.slug}`}
+ function eventUrl(e:Row){
+  const token=(e.cover_url||e.event_date||'1').split('/').pop()?.replace(/[^a-zA-Z0-9]/g,'').slice(0,18)||'1';
+  return `${location.origin}/evento/${e.slug}?v=${token}`
+ }
  async function shareNative(e:Row){
   setShareMsg('');
   const ok=await nativeShare(`${e.title} | Legacy Semeando Memórias`,`Veja as fotos do evento ${e.title}.`,eventUrl(e));
