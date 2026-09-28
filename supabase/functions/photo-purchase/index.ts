@@ -95,12 +95,12 @@ Deno.serve(async request=>{
       const [{data:gateway},finance]=await Promise.all([
         admin
           .from('billing_gateway_settings')
-          .select('enabled,environment,webhook_configured,last_health_status,last_health_message')
+          .select('enabled,environment,webhook_configured,last_health_status,last_health_message,last_health_details')
           .eq('provider','asaas')
           .maybeSingle(),
         financeByOrganization(admin,event.organization_id),
       ]);
-      const rootReady=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&['ready','ok'].includes(String(gateway?.last_health_status||''));
+      const healthDetails=gateway?.last_health_details||{};const apiHealthy=gateway?.last_health_status!=='blocked'&&healthDetails?.api_ok!==false;const rootReady=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&apiHealthy;
       const beneficiary=splitConfiguration(finance,event.id);
       const ready=rootReady&&beneficiary.ready;
       return j({
@@ -180,12 +180,12 @@ Deno.serve(async request=>{
       const [{data:gateway},finance]=await Promise.all([
         admin
           .from('billing_gateway_settings')
-          .select('enabled,webhook_configured,last_health_status,last_health_message')
+          .select('enabled,webhook_configured,last_health_status,last_health_message,last_health_details')
           .eq('provider','asaas')
           .maybeSingle(),
         financeByOrganization(admin,event.organization_id),
       ]);
-      const rootReady=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&['ready','ok'].includes(String(gateway?.last_health_status||''));
+      const healthDetails=gateway?.last_health_details||{};const apiHealthy=gateway?.last_health_status!=='blocked'&&healthDetails?.api_ok!==false;const rootReady=!!ASAAS&&!!gateway?.enabled&&!!gateway?.webhook_configured&&apiHealthy;
       const beneficiary=splitConfiguration(finance,event.id);
       if(!rootReady){
         return j({
@@ -272,10 +272,15 @@ Deno.serve(async request=>{
               email:visitor.email||undefined,
               mobilePhone:digits(visitor.whatsapp)||undefined,
               externalReference:'visitor:'+visitorId,
-              notificationDisabled:false,
+              notificationDisabled:true,
             }),
           });
           customer=created.id;
+        }else{
+          await asaas('/customers/'+encodeURIComponent(customer),{
+            method:'PUT',
+            body:JSON.stringify({notificationDisabled:true}),
+          });
         }
         payment=await asaas('/payments',{
           method:'POST',
